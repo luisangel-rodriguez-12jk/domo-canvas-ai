@@ -11,11 +11,39 @@ import { defaultSettings, mergeSettings } from '../src/core/settings';
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 let mainWindow: BrowserWindow | null = null;
-let updateStatus: UpdateStatus = { state: isDev ? 'disabled' : 'idle', message: isDev ? 'Auto-updates desactivados en modo desarrollo.' : 'Listo para buscar actualizaciones.' };
+let updateStatus: UpdateStatus = { state: isDev ? 'disabled' : 'idle', message: isDev ? 'Auto-updates desactivados en modo desarrollo.' : 'Buscando actualizaciones al abrir…' };
+let autoUpdateConfigured = false;
+let updateCheckStarted = false;
+let installTimer: NodeJS.Timeout | null = null;
+
+const AUTO_INSTALL_DELAY_MS = 2500;
 
 function setUpdateStatus(status: UpdateStatus) {
   updateStatus = status;
   mainWindow?.webContents.send('update:status', status);
+}
+
+function installDownloadedUpdate(version?: string) {
+  if (installTimer) clearTimeout(installTimer);
+  setUpdateStatus({ state: 'downloaded', message: `Actualización ${version ?? ''} lista. Reiniciando para instalar automáticamente…`, version });
+  installTimer = setTimeout(() => {
+    try {
+      autoUpdater.quitAndInstall(false, true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setUpdateStatus({ state: 'error', message: `No se pudo reiniciar para instalar: ${message}` });
+    }
+  }, AUTO_INSTALL_DELAY_MS);
+}
+
+function startAutoUpdateCheck() {
+  if (isDev || updateCheckStarted) return;
+  updateCheckStarted = true;
+  setUpdateStatus({ state: 'checking', message: 'Buscando actualizaciones al abrir…' });
+  autoUpdater.checkForUpdates().catch((error) => {
+    updateCheckStarted = false;
+    setUpdateStatus({ state: 'error', message: `No se pudo buscar actualización: ${error.message}` });
+  });
 }
 
 function configureAutoUpdates(win: BrowserWindow) {
@@ -23,18 +51,20 @@ function configureAutoUpdates(win: BrowserWindow) {
   if (isDev) return;
 
   autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = false;
 
-  autoUpdater.on('checking-for-update', () => setUpdateStatus({ state: 'checking', message: 'Buscando actualizaciones…' }));
-  autoUpdater.on('update-available', (info) => setUpdateStatus({ state: 'available', message: `Actualización ${info.version} disponible. Descargando…`, version: info.version }));
-  autoUpdater.on('update-not-available', (info) => setUpdateStatus({ state: 'not-available', message: `Ya tienes la versión más nueva (${info.version}).`, version: info.version }));
-  autoUpdater.on('download-progress', (progress) => setUpdateStatus({ state: 'downloading', message: `Descargando actualización… ${Math.round(progress.percent)}%`, progress: progress.percent }));
-  autoUpdater.on('update-downloaded', (info) => setUpdateStatus({ state: 'downloaded', message: `Actualización ${info.version} lista. Reinicia para instalar.`, version: info.version }));
-  autoUpdater.on('error', (error) => setUpdateStatus({ state: 'error', message: `No se pudo actualizar: ${error.message}` }));
+  if (!autoUpdateConfigured) {
+    autoUpdateConfigured = true;
+    autoUpdater.on('checking-for-update', () => setUpdateStatus({ state: 'checking', message: 'Buscando actualizaciones al abrir…' }));
+    autoUpdater.on('update-available', (info) => setUpdateStatus({ state: 'available', message: `Actualización ${info.version} disponible. Descargando automáticamente…`, version: info.version }));
+    autoUpdater.on('update-not-available', (info) => setUpdateStatus({ state: 'not-available', message: `Ya tienes la versión más nueva (${info.version}).`, version: info.version }));
+    autoUpdater.on('download-progress', (progress) => setUpdateStatus({ state: 'downloading', message: `Descargando actualización… ${Math.round(progress.percent)}%`, progress: progress.percent }));
+    autoUpdater.on('update-downloaded', (info) => installDownloadedUpdate(info.version));
+    autoUpdater.on('error', (error) => setUpdateStatus({ state: 'error', message: `No se pudo actualizar: ${error.message}` }));
+  }
 
-  setTimeout(() => {
-    autoUpdater.checkForUpdatesAndNotify().catch((error) => setUpdateStatus({ state: 'error', message: `No se pudo buscar actualización: ${error.message}` }));
-  }, 3500);
+  setTimeout(startAutoUpdateCheck, 1000);
 }
 
 function getSettingsPath() {
@@ -265,7 +295,8 @@ app.whenReady().then(() => {
   ipcMain.handle('update:get-status', () => updateStatus);
   ipcMain.handle('update:check', async () => {
     if (isDev) return updateStatus;
-    await autoUpdater.checkForUpdatesAndNotify();
+    updateCheckStarted = false;
+    startAutoUpdateCheck();
     return updateStatus;
   });
   ipcMain.handle('update:install', () => {

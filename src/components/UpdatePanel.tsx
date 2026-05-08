@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { UpdateStatus } from '../core/types';
 
-const defaultStatus: UpdateStatus = { state: 'idle', message: 'Listo para buscar actualizaciones.' };
+const defaultStatus: UpdateStatus = { state: 'idle', message: 'Buscando actualizaciones al abrir…' };
 
 export function UpdatePanel() {
   const [status, setStatus] = useState<UpdateStatus>(defaultStatus);
@@ -29,7 +29,7 @@ export function UpdatePanel() {
           Reiniciar e instalar
         </button>
       </div>
-      <p className="hint">Las actualizaciones se descargan desde GitHub Releases cuando instalas la app con el instalador NSIS.</p>
+      <p className="hint">Al abrir, la app busca updates en GitHub Releases; si encuentra uno, lo descarga y se reinicia sola para instalarlo.</p>
     </section>
   );
 }
