@@ -51,11 +51,20 @@ npm run dev
 
 ## Crear instalador de Windows
 
-Para releases reales, lo recomendado es crear un tag y dejar que GitHub Actions compile en Windows:
+Para releases reales, lo recomendado es crear un tag y dejar que GitHub Actions compile en Windows. Si el repo aún no existe, usa el helper local sin pegar tokens en el chat:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+export GITHUB_TOKEN='tu_token_local_con_scopes_repo_y_workflow'
+./scripts/publish-github.sh
+```
+
+Ese script crea el repo público `luisangel-rodriguez-12jk/domo-canvas-ai`, hace push de `main`, crea/sube `v0.1.0` y dispara GitHub Actions.
+
+Después, para nuevas releases:
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 El workflow `.github/workflows/release.yml` ejecuta tests, typecheck y publica el instalador NSIS en GitHub Releases. La app instalada desde ese `.exe` revisa updates automáticamente al iniciar y también tiene un panel “Actualizaciones”.
