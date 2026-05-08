@@ -45,7 +45,11 @@ else
 fi
 
 git remote set-url origin "https://github.com/${OWNER}/${REPO}.git"
-git push -u origin main
+
+# Usa el token solo para esta invocación de git, sin guardarlo en origin ni en .git/config.
+# Así evitamos el prompt de usuario/contraseña de GitHub, que ya no acepta passwords.
+GIT_AUTH_HEADER="Authorization: Bearer ${GITHUB_TOKEN}"
+git -c "http.https://github.com/.extraheader=${GIT_AUTH_HEADER}" push -u origin main
 
 if git rev-parse "$TAG" >/dev/null 2>&1; then
   echo "Tag $TAG ya existe localmente."
@@ -53,6 +57,6 @@ else
   git tag "$TAG"
 fi
 
-git push origin "$TAG"
+git -c "http.https://github.com/.extraheader=${GIT_AUTH_HEADER}" push origin "$TAG"
 
 echo "Listo. Revisa GitHub Actions en: https://github.com/${OWNER}/${REPO}/actions"
