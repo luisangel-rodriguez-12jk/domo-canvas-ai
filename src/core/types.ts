@@ -80,6 +80,14 @@ export interface Stroke {
   color: string;
   width: number;
   opacity: number;
+  metaPrompt?: string;
+}
+
+export interface SavedPrompt {
+  id: string;
+  name: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface AiHistoryItem {

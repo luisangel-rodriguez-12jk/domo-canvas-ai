@@ -47,11 +47,12 @@ describe('requested editor UX upgrades', () => {
     expect(prompt.toLowerCase()).toContain('fotorealista');
   });
 
-  it('has source hooks for inline canvas text editing, ctrl+z, tooltips and brush palette', () => {
+  it('has source hooks for inline canvas text editing, ctrl+z, app-owned tooltips and brush palette', () => {
     expect(canvasSource()).toContain('text-edit-overlay');
     expect(canvasSource()).toContain('onDblClick');
     expect(appSource()).toContain("event.key.toLowerCase() === 'z'");
     expect(toolbarSource()).toContain('data-tooltip');
+    expect(toolbarSource()).not.toContain('title={description}');
     expect(toolbarSource()).toContain('brush-palette');
   });
 
@@ -76,5 +77,29 @@ describe('requested editor UX upgrades', () => {
   it('asks whether to keep stored API keys before installing an update', () => {
     expect(mainSource()).toContain('confirmPreserveApiKeysBeforeUpdate');
     expect(mainSource()).toContain('Conservar APIs guardadas');
+  });
+
+  it('replaces fixed prompt preset buttons with user-saved custom prompts', () => {
+    expect(appSource()).not.toContain('promptPresets.map');
+    expect(appSource()).toContain('savedPrompts');
+    expect(appSource()).toContain('saveCustomPrompt');
+    expect(appSource()).toContain('domo.savedPrompts.v1');
+  });
+
+  it('records a metaprompt on brush strokes and injects stroke meanings into AI prompt context', () => {
+    expect(canvasSource()).toContain('brushMetaPrompt');
+    expect(canvasSource()).toContain('metaPrompt: brushMetaPrompt.trim()');
+    const project = createProject('Trazo');
+    project.strokes.push({ id: 's1', tool: 'brush', points: [0, 0, 10, 10], color: '#fff', width: 12, opacity: 1, metaPrompt: 'Trazo de textura bordada y forma geométrica' });
+    const prompt = buildPrintAwarePrompt('Usa mis trazos', project, defaultSettings.ai);
+    expect(prompt).toContain('Trazo de textura bordada');
+  });
+
+  it('exposes AI generation modes for background images and transparent library elements', () => {
+    expect(appSource()).toContain('generateAiBackground');
+    expect(appSource()).toContain('generateAiLibraryAsset');
+    expect(appSource()).toContain('sin fondo');
+    expect(appSource()).toContain('generatedAssets');
+    expect(appSource()).toContain('extraAssets={generatedAssets}');
   });
 });

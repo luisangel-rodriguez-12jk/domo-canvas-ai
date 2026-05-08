@@ -111,11 +111,12 @@ interface Props {
   setSelectedId: (id: string | null) => void;
   brushColor: string;
   brushWidth: number;
+  brushMetaPrompt: string;
   stageRef: React.RefObject<Konva.Stage | null>;
   onAssetDrop?: (asset: LibraryAsset, position: { x: number; y: number }) => void;
 }
 
-export function CanvasEditor({ project, setProject, tool, selectedId, setSelectedId, brushColor, brushWidth, stageRef, onAssetDrop }: Props) {
+export function CanvasEditor({ project, setProject, tool, selectedId, setSelectedId, brushColor, brushWidth, brushMetaPrompt, stageRef, onAssetDrop }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 900, height: 780 });
@@ -170,6 +171,7 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
       color: tool === 'ai-mask' ? '#ff2a55' : brushColor,
       width: tool === 'ai-mask' ? Math.max(brushWidth, 36) : brushWidth,
       opacity: tool === 'ai-mask' ? 0.58 : 1,
+      metaPrompt: brushMetaPrompt.trim() || undefined,
     };
     setProject(touchProject({ ...project, strokes: [...project.strokes, stroke] }));
   };

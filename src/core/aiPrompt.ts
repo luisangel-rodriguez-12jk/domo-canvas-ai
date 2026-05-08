@@ -2,6 +2,9 @@
 import type { AiSettings, CanvasProject } from './types';
 
 export function buildPrintAwarePrompt(userPrompt: string, project: CanvasProject, settings: AiSettings): string {
+  const strokeMeanings = project.strokes
+    .filter((stroke) => stroke.metaPrompt?.trim())
+    .map((stroke, index) => `Trazo ${index + 1} (${stroke.tool}, ${Math.round(stroke.width)}px, ${stroke.color}): ${stroke.metaPrompt?.trim()}`);
   const printRules = [
     'Actúa como director creativo experto en diseño de playeras streetwear.',
     `Lienzo destino: ${project.width}x${project.height}px, composición centrada para impresión.`,
@@ -13,5 +16,5 @@ export function buildPrintAwarePrompt(userPrompt: string, project: CanvasProject
     'Evita fondos fotográficos innecesarios, detalles microscópicos imposibles de imprimir y texto deformado.',
   ];
 
-  return `${printRules.join('\n')}\n\nInstrucción del usuario:\n${userPrompt.trim()}`;
+  return `${printRules.join('\n')}${strokeMeanings.length ? `\n\nSignificado de trazos manuales para la IA:\n${strokeMeanings.join('\n')}` : ''}\n\nInstrucción del usuario:\n${userPrompt.trim()}`;
 }

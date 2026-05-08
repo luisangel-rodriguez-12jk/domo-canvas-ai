@@ -11,11 +11,12 @@ import { UpdatePanel } from './components/UpdatePanel';
 import { addImageLayer, addShapeLayer, addTextLayer, createProject, touchProject } from './core/layers';
 import { buildPrintAwarePrompt } from './core/aiPrompt';
 import { createMockAiPreview } from './core/mockAi';
-import { applyPromptPreset, promptPresets } from './core/presets';
 import { exportStageDataUrl, makeExportFileName, type ExportMode } from './core/exporter';
 import { createProjectSnapshot, loadProjectSnapshot, makeSafeFileName } from './core/projectIO';
 import { defaultSettings, mergeSettings } from './core/settings';
-import type { AiHistoryItem, AppSettings, CanvasProject, LibraryAsset, ShapeLayer, ToolMode } from './core/types';
+import type { AiHistoryItem, AppSettings, CanvasProject, GenerateAiResponse, LibraryAsset, SavedPrompt, ShapeLayer, ToolMode } from './core/types';
+
+const SAVED_PROMPTS_KEY = 'domo.savedPrompts.v1';
 
 async function readImageFile(file: File) {
   const src = await new Promise<string>((resolve, reject) => {
@@ -24,13 +25,30 @@ async function readImageFile(file: File) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+  const image = await loadImageElement(src);
+  return { src, width: image.naturalWidth, height: image.naturalHeight };
+}
+
+function loadImageElement(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = reject;
     img.src = src;
   });
-  return { src, width: image.naturalWidth, height: image.naturalHeight };
+}
+
+function loadSavedPrompts(): SavedPrompt[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SAVED_PROMPTS_KEY) || '[]') as SavedPrompt[];
+    return Array.isArray(parsed) ? parsed.filter((prompt) => prompt?.id && prompt?.text) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedPrompts(prompts: SavedPrompt[]) {
+  window.localStorage.setItem(SAVED_PROMPTS_KEY, JSON.stringify(prompts.slice(0, 40)));
 }
 
 const isTextEntry = (target: EventTarget | null) => {
@@ -48,9 +66,13 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [brushColor, setBrushColor] = useState('#ffffff');
   const [brushWidth, setBrushWidth] = useState(24);
+  const [brushMetaPrompt, setBrushMetaPrompt] = useState('');
   const [shapeFill, setShapeFill] = useState('transparent');
   const [prompt, setPrompt] = useState('Integra las capas y rayones en un diseño streetwear para playera negra, alto contraste, ultrarrealista, fondo transparente, listo para impresión.');
+  const [promptName, setPromptName] = useState('');
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>(() => loadSavedPrompts());
   const [aiRevisionPrompt, setAiRevisionPrompt] = useState('');
+  const [generatedAssets, setGeneratedAssets] = useState<LibraryAsset[]>([]);
   const [status, setStatus] = useState('Listo. Puedes cargar fondo, logos PNG y dibujar encima.');
   const [aiOutput, setAiOutput] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -101,6 +123,30 @@ export default function App() {
   useEffect(() => {
     window.domo?.getSettings().then((loaded) => setSettings(mergeSettings(loaded))).catch(() => setSettings(defaultSettings));
   }, []);
+
+  const saveCustomPrompt = () => {
+    const text = prompt.trim();
+    if (!text) {
+      setStatus('Escribe un prompt antes de guardarlo.');
+      return;
+    }
+    const name = promptName.trim() || text.replace(/\s+/g, ' ').slice(0, 42) || 'Prompt custom';
+    const next: SavedPrompt[] = [
+      { id: `prompt-${Date.now().toString(36)}`, name, text, createdAt: new Date().toISOString() },
+      ...savedPrompts.filter((item) => item.text !== text),
+    ].slice(0, 40);
+    setSavedPrompts(next);
+    persistSavedPrompts(next);
+    setPromptName('');
+    setStatus(`Prompt custom guardado: ${name}`);
+  };
+
+  const deleteCustomPrompt = (id: string) => {
+    const next = savedPrompts.filter((item) => item.id !== id);
+    setSavedPrompts(next);
+    persistSavedPrompts(next);
+    setStatus('Prompt custom eliminado.');
+  };
 
   const addImage = (asBackground = false) => {
     pendingBackgroundRef.current = asBackground;
@@ -196,12 +242,11 @@ export default function App() {
     window.alert(message);
   };
 
-  const generateAi = async (promptOverride?: string) => {
+  const requestAiImage = async (activePrompt: string, statusMessage: string): Promise<GenerateAiResponse | null> => {
     const stage = stageRef.current;
-    if (!stage) return;
-    const activePrompt = promptOverride ?? prompt;
+    if (!stage) return null;
     setIsGenerating(true);
-    setStatus('Componiendo imagen ultrarrealista y enviando a IA…');
+    setStatus(statusMessage);
     try {
       const compositionPng = stage.toDataURL({ mimeType: 'image/png', pixelRatio: Math.max(1, projectRef.current.width / stage.width()) });
       const request = { prompt: activePrompt, compositionPng, project: projectRef.current, settings: settings.ai };
@@ -216,12 +261,45 @@ export default function App() {
         output: response.imageDataUrl,
       };
       commitProject((current) => touchProject({ ...current, aiHistory: [history, ...current.aiHistory].slice(0, 20) }));
-      setStatus(`IA completada con ${response.provider}/${response.model}. Puedes guardarla, pegarla como capa o regenerarla con cambios.`);
+      return response;
     } catch (error) {
       setStatus(error instanceof Error ? `Error IA: ${error.message}` : 'Error IA desconocido.');
+      return null;
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const generateAi = async (promptOverride?: string) => {
+    const activePrompt = promptOverride ?? prompt;
+    const response = await requestAiImage(activePrompt, 'Componiendo imagen ultrarrealista y enviando a IA…');
+    if (response) setStatus(`IA completada con ${response.provider}/${response.model}. Puedes guardarla, pegarla como capa o regenerarla con cambios.`);
+  };
+
+  const generateAiBackground = async () => {
+    const backgroundPrompt = `${prompt}\n\nModo fondo: genera una imagen de fondo/mockup ultrarrealista para previsualizar playeras, con iluminación real, tela creíble y composición útil para diseño streetwear. No agregues texto nuevo salvo que el usuario lo pida.`;
+    const response = await requestAiImage(backgroundPrompt, 'Generando fondo IA ultrarrealista…');
+    if (!response) return;
+    const image = await loadImageElement(response.imageDataUrl);
+    commitProject((current) => addImageLayer(current, { name: 'Fondo IA', src: response.imageDataUrl, naturalWidth: image.naturalWidth || current.width, naturalHeight: image.naturalHeight || current.height, asBackground: true }));
+    setTool('select');
+    setStatus('Fondo IA generado y aplicado. Herramienta Mover activada.');
+  };
+
+  const generateAiLibraryAsset = async () => {
+    const assetPrompt = `${prompt}\n\nModo elemento de biblioteca: genera UN SOLO elemento gráfico para playera en PNG sin fondo. Fondo transparente obligatorio, sin mockup, sin playera, sin escenario, sin sombras de fondo, silueta limpia recortada, listo para arrastrarlo como asset. Si agregas texto, que sea nítido y editable visualmente.`;
+    const response = await requestAiImage(assetPrompt, 'Generando elemento IA sin fondo para biblioteca…');
+    if (!response) return;
+    const image = await loadImageElement(response.imageDataUrl);
+    const asset: LibraryAsset = {
+      id: `ai-asset-${Date.now().toString(36)}`,
+      name: `Elemento IA sin fondo ${generatedAssets.length + 1}`,
+      src: response.imageDataUrl,
+      naturalWidth: image.naturalWidth || 1024,
+      naturalHeight: image.naturalHeight || 1024,
+    };
+    setGeneratedAssets((current) => [asset, ...current].slice(0, 30));
+    setStatus('Elemento IA sin fondo agregado a la biblioteca. Haz clic o arrástralo al lienzo.');
   };
 
   const regenerateAiWithChanges = () => {
@@ -237,7 +315,7 @@ export default function App() {
 
   const addGeneratedAsLayer = async () => {
     if (!aiOutput) return;
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = aiOutput; });
+    const image = await loadImageElement(aiOutput);
     commitProject((current) => addImageLayer(current, { name: 'Resultado IA', src: aiOutput, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight }));
     setTool('select');
     setStatus('Resultado IA agregado al lienzo como capa. Herramienta Mover activada.');
@@ -285,6 +363,8 @@ export default function App() {
         setBrushColor={setBrushColor}
         brushWidth={brushWidth}
         setBrushWidth={setBrushWidth}
+        brushMetaPrompt={brushMetaPrompt}
+        setBrushMetaPrompt={setBrushMetaPrompt}
         shapeFill={shapeFill}
         setShapeFill={setShapeFill}
         onAddShape={addShape}
@@ -309,21 +389,34 @@ export default function App() {
         setSelectedId={setSelectedId}
         brushColor={brushColor}
         brushWidth={brushWidth}
+        brushMetaPrompt={brushMetaPrompt}
         stageRef={stageRef}
         onAssetDrop={addAssetToProject}
       />
       <aside className="right-rail">
         <section className="panel ai-panel">
           <div className="panel-title">Prompt creativo ultrarrealista</div>
-          <div className="preset-grid">
-            {promptPresets.map((preset) => (
-              <button key={preset.id} title={preset.description} onClick={() => setPrompt(applyPromptPreset(preset.id, prompt))}>
-                {preset.name}
-              </button>
-            ))}
+          <p className="hint">Edita libremente el prompt, guarda tus propios prompts custom y reutilízalos sin botones predefinidos.</p>
+          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => event.stopPropagation()} />
+          <div className="prompt-save-row">
+            <input placeholder="Nombre del prompt custom" value={promptName} onChange={(event) => setPromptName(event.target.value)} onKeyDown={(event) => event.stopPropagation()} />
+            <button onClick={saveCustomPrompt}>Guardar prompt</button>
           </div>
-          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-          <button className="primary" disabled={isGenerating} onClick={() => { void generateAi(); }}>{isGenerating ? 'Generando…' : 'Generar con IA'}</button>
+          {savedPrompts.length > 0 && (
+            <div className="saved-prompts">
+              {savedPrompts.map((item) => (
+                <div key={item.id} className="saved-prompt-row">
+                  <button onClick={() => { setPrompt(item.text); setStatus(`Prompt cargado: ${item.name}`); }}>{item.name}</button>
+                  <button aria-label={`Eliminar ${item.name}`} onClick={() => deleteCustomPrompt(item.id)}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button className="primary" disabled={isGenerating} onClick={() => { void generateAi(); }}>{isGenerating ? 'Generando…' : 'Generar diseño IA'}</button>
+          <div className="grid-2 ai-mode-actions">
+            <button disabled={isGenerating} onClick={() => { void generateAiBackground(); }}>Generar fondo IA</button>
+            <button disabled={isGenerating} onClick={() => { void generateAiLibraryAsset(); }}>Generar asset sin fondo</button>
+          </div>
           {aiOutput && (
             <div className="ai-output">
               <img src={aiOutput} alt="Resultado IA" />
@@ -334,12 +427,13 @@ export default function App() {
                 placeholder="Cambios para regenerar: más realista, cambia color, conserva logo, etc."
                 value={aiRevisionPrompt}
                 onChange={(event) => setAiRevisionPrompt(event.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
               />
               <button onClick={regenerateAiWithChanges} disabled={isGenerating}>{isGenerating ? 'Regenerando…' : 'Regenerar con cambios'}</button>
             </div>
           )}
         </section>
-        <AssetLibrary onAddAsset={addAssetToProject} onStatus={setStatus} />
+        <AssetLibrary onAddAsset={addAssetToProject} onStatus={setStatus} extraAssets={generatedAssets} />
         <LayerPanel project={project} selectedId={selectedId} setProject={commitProject} setSelectedId={setSelectedId} />
         <LayerProperties project={project} selectedId={selectedId} setProject={commitProject} setSelectedId={setSelectedId} />
         <PreflightPanel project={project} />

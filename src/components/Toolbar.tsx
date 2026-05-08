@@ -10,6 +10,8 @@ interface Props {
   setBrushColor: (color: string) => void;
   brushWidth: number;
   setBrushWidth: (width: number) => void;
+  brushMetaPrompt: string;
+  setBrushMetaPrompt: (value: string) => void;
   shapeFill: string;
   setShapeFill: (color: string) => void;
   onAddShape: (shape: ShapeLayer['shape']) => void;
@@ -26,7 +28,7 @@ const colors = ['#ffffff', '#000000', '#ff2a55', '#7a37ff', '#00ff88', '#ffcc00'
 
 export function Toolbar(props: Props) {
   const tooltipButton = (label: string, description: string, icon: ReactNode, onClick: () => void, className = '') => (
-    <button className={className} onClick={onClick} title={description} data-tooltip={description}>{icon}<span>{label}</span></button>
+    <button className={className} onClick={onClick} aria-label={description} data-tooltip={description}>{icon}<span>{label}</span></button>
   );
   const toolButton = (id: ToolMode, label: string, description: string, icon: ReactNode) => (
     tooltipButton(label, description, icon, () => props.setTool(id), props.tool === id ? 'active' : '')
@@ -45,12 +47,19 @@ export function Toolbar(props: Props) {
         <div className="brush-palette" data-tooltip="Paleta rápida: color, grosor y presets del pincel actual.">
           <div className="palette-colors">
             {colors.map((color) => (
-              <button key={color} className={props.brushColor === color ? 'swatch active' : 'swatch'} style={{ background: color }} onClick={() => props.setBrushColor(color)} title={color} />
+              <button key={color} className={props.brushColor === color ? 'swatch active' : 'swatch'} style={{ background: color }} onClick={() => props.setBrushColor(color)} aria-label={`Color ${color}`} />
             ))}
           </div>
-          <input type="color" value={props.brushColor} onChange={(event) => props.setBrushColor(event.target.value)} title="Color personalizado" />
-          <input type="range" min={4} max={140} value={props.brushWidth} onChange={(event) => props.setBrushWidth(Number(event.target.value))} title="Grosor del pincel" />
+          <input type="color" value={props.brushColor} onChange={(event) => props.setBrushColor(event.target.value)} aria-label="Color personalizado" />
+          <input type="range" min={4} max={140} value={props.brushWidth} onChange={(event) => props.setBrushWidth(Number(event.target.value))} aria-label="Grosor del pincel" />
           <span>{props.brushWidth}px</span>
+          <textarea
+            className="brush-metaprompt"
+            aria-label="Metaprompt de trazos"
+            placeholder="Metaprompt del trazo: textura bordada, corregir a forma geométrica…"
+            value={props.brushMetaPrompt}
+            onChange={(event) => props.setBrushMetaPrompt(event.target.value)}
+          />
         </div>
       )}
       <div className="shape-tools">

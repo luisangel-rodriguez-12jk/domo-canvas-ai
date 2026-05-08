@@ -4,6 +4,7 @@ import type { LibraryAsset } from '../core/types';
 interface Props {
   onAddAsset: (asset: LibraryAsset) => void;
   onStatus: (message: string) => void;
+  extraAssets?: LibraryAsset[];
 }
 
 async function readAssetFile(file: File): Promise<LibraryAsset> {
@@ -28,9 +29,10 @@ async function readAssetFile(file: File): Promise<LibraryAsset> {
   };
 }
 
-export function AssetLibrary({ onAddAsset, onStatus }: Props) {
+export function AssetLibrary({ onAddAsset, onStatus, extraAssets = [] }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
+  const visibleAssets = [...extraAssets, ...assets];
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
   const loadFiles = async (files: FileList | null) => {
@@ -58,14 +60,14 @@ export function AssetLibrary({ onAddAsset, onStatus }: Props) {
       }}
     >
       <div className="panel-title">Biblioteca de archivos</div>
-      <p className="hint">Carga PNG, JPG, WebP o SVG para reutilizarlos. Luego arrastra el asset al lienzo o haz clic para insertarlo centrado.</p>
+      <p className="hint">Carga PNG, JPG, WebP o SVG, o genera elementos IA sin fondo para reutilizarlos. Luego arrastra el asset al lienzo o haz clic para insertarlo centrado.</p>
       <button className="asset-upload" onClick={() => inputRef.current?.click()}>Cargar archivos</button>
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" multiple hidden onChange={(event) => loadFiles(event.target.files)} />
-      {assets.length === 0 ? (
+      {visibleAssets.length === 0 ? (
         <div className="asset-dropzone">Suelta aquí tus logos, texturas, referencias o PNGs.</div>
       ) : (
         <div className="asset-grid user-assets">
-          {assets.map((asset) => (
+          {visibleAssets.map((asset) => (
             <button
               key={asset.id}
               draggable

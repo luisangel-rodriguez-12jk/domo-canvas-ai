@@ -86,6 +86,7 @@ button:disabled { opacity: .5; cursor: wait; }
 .brush-palette .swatch.active { outline: 2px solid #ff2a55; }
 .brush-palette input[type="color"] { width: 54px; height: 28px; border: 0; background: transparent; }
 .brush-palette input[type="range"] { width: 84px; }
+.brush-metaprompt { width: 92px; min-height: 62px; resize: vertical; border: 1px solid #343442; background: #08080c; color: #f5f5f7; border-radius: 10px; padding: 7px; font-size: 10px; line-height: 1.25; }
 .brush-palette span { color: #cfcfd8; font-size: 11px; }
 .shape-tools { display: grid; gap: 6px; padding: 6px 0; border-top: 1px solid #24242b; border-bottom: 1px solid #24242b; }
 .shape-tools .mini-title { text-align: center; color: #8d8d9b; text-transform: uppercase; letter-spacing: .12em; font-size: 9px; font-weight: 900; }
@@ -128,6 +129,13 @@ button:disabled { opacity: .5; cursor: wait; }
   gap: 7px;
   margin-bottom: 10px;
 }
+.prompt-save-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
+.prompt-save-row input { min-width: 0; border: 1px solid #343442; background: #0d0d13; color: white; border-radius: 12px; padding: 10px; }
+.prompt-save-row button, .saved-prompts button, .ai-mode-actions button { border-radius: 12px; padding: 10px; color: white; background: #252532; font-weight: 800; }
+.saved-prompts { display: grid; gap: 7px; margin-top: 10px; }
+.saved-prompt-row { display: grid; grid-template-columns: 1fr 34px; gap: 6px; }
+.saved-prompt-row button:first-child { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-mode-actions { margin-top: 9px; }
 .preset-grid button {
   min-height: 34px;
   border-radius: 11px;
