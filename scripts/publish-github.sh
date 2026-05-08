@@ -83,8 +83,8 @@ fi
 git remote set-url origin "https://github.com/${OWNER}/${REPO}.git"
 
 # Usa el token solo para esta invocación de git, sin guardarlo en origin ni en .git/config.
-# Así evitamos el prompt de usuario/contraseña de GitHub, que ya no acepta passwords.
-GIT_AUTH_HEADER="Authorization: Bearer ${GITHUB_TOKEN}"
+# Git sobre HTTPS espera Basic auth: usuario ficticio x-access-token + token como password.
+GIT_AUTH_HEADER="Authorization: Basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
 git -c "http.https://github.com/.extraheader=${GIT_AUTH_HEADER}" push -u origin main
 
 if git rev-parse "$TAG" >/dev/null 2>&1; then
