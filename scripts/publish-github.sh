@@ -6,9 +6,16 @@ REPO="${GITHUB_REPO:-domo-canvas-ai}"
 VISIBILITY="${GITHUB_VISIBILITY:-public}"
 TAG="${RELEASE_TAG:-v0.1.0}"
 
+TOKEN_FILE="${HOME}/.hermes/secrets/domo_github_token"
+if [[ -z "${GITHUB_TOKEN:-}" && -f "$TOKEN_FILE" ]]; then
+  GITHUB_TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
+fi
+
 if [[ -z "${GITHUB_TOKEN:-}" ]]; then
-  echo "Falta GITHUB_TOKEN. Genera un token en https://github.com/settings/tokens con scopes repo + workflow." >&2
-  echo "Luego ejecuta: export GITHUB_TOKEN='tu_token_local'" >&2
+  echo "Falta GITHUB_TOKEN." >&2
+  echo "Opción recomendada: ./scripts/save-github-token-local.sh" >&2
+  echo "También puedes usar: export GITHUB_TOKEN='tu_token_local'" >&2
+  echo "Genera el token en https://github.com/settings/tokens con scopes repo + workflow." >&2
   exit 1
 fi
 
