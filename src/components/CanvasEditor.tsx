@@ -1,8 +1,8 @@
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
-import type { CanvasLayer, CanvasProject, ImageLayer, Stroke, ToolMode } from '../core/types';
+import type { CanvasLayer, CanvasProject, ImageLayer, LibraryAsset, Stroke, ToolMode } from '../core/types';
 import { createId, moveLayer, touchProject, updateLayer } from '../core/layers';
 
 function useHtmlImage(src?: string) {
@@ -62,9 +62,10 @@ interface Props {
   brushColor: string;
   brushWidth: number;
   stageRef: React.RefObject<Konva.Stage | null>;
+  onAssetDrop?: (asset: LibraryAsset, position: { x: number; y: number }) => void;
 }
 
-export function CanvasEditor({ project, setProject, tool, selectedId, setSelectedId, brushColor, brushWidth, stageRef }: Props) {
+export function CanvasEditor({ project, setProject, tool, selectedId, setSelectedId, brushColor, brushWidth, stageRef, onAssetDrop }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 900, height: 780 });
@@ -133,8 +134,41 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
 
   const stopDrawing = () => setIsDrawing(false);
 
+  const getProjectPointFromClient = (clientX: number, clientY: number) => {
+    const stage = stageRef.current;
+    const rect = stage?.container().getBoundingClientRect();
+    if (!stage || !rect) return null;
+    return {
+      x: Math.max(0, Math.min(project.width, (clientX - rect.left) / scale)),
+      y: Math.max(0, Math.min(project.height, (clientY - rect.top) / scale)),
+    };
+  };
+
+  const handleAssetDrop = (event: DragEvent<HTMLDivElement>) => {
+    const raw = event.dataTransfer.getData('application/x-domo-asset');
+    if (!raw || !onAssetDrop) return;
+    event.preventDefault();
+    try {
+      const asset = JSON.parse(raw) as LibraryAsset;
+      const position = getProjectPointFromClient(event.clientX, event.clientY);
+      if (asset?.src && position) onAssetDrop(asset, position);
+    } catch {
+      // Ignore unrelated drags.
+    }
+  };
+
   return (
-    <main className="canvas-shell" ref={containerRef}>
+    <main
+      className="canvas-shell"
+      ref={containerRef}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('application/x-domo-asset')) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        }
+      }}
+      onDrop={handleAssetDrop}
+    >
       <Stage
         ref={stageRef}
         width={stageWidth}

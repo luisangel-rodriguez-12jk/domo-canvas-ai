@@ -16,7 +16,7 @@ import { applyPromptPreset, promptPresets } from './core/presets';
 import { exportStageDataUrl, makeExportFileName, type ExportMode } from './core/exporter';
 import { createProjectSnapshot, loadProjectSnapshot, makeSafeFileName } from './core/projectIO';
 import { defaultSettings, mergeSettings } from './core/settings';
-import type { AiHistoryItem, AppSettings, CanvasProject, ToolMode } from './core/types';
+import type { AiHistoryItem, AppSettings, CanvasProject, LibraryAsset, ToolMode } from './core/types';
 
 async function readImageFile(file: File) {
   const src = await new Promise<string>((resolve, reject) => {
@@ -148,6 +148,28 @@ export default function App() {
     setStatus('Resultado IA agregado al lienzo como capa.');
   };
 
+  const addAssetToProject = (asset: LibraryAsset, position?: { x: number; y: number }) => {
+    setProject((current) => {
+      const maxWidth = Math.min(current.width * 0.42, asset.naturalWidth);
+      const scale = Math.min(1, maxWidth / Math.max(1, asset.naturalWidth));
+      const width = Math.round(asset.naturalWidth * scale);
+      const height = Math.round(asset.naturalHeight * scale);
+      const x = position ? Math.max(0, Math.min(current.width - width, Math.round(position.x - width / 2))) : undefined;
+      const y = position ? Math.max(0, Math.min(current.height - height, Math.round(position.y - height / 2))) : undefined;
+      const updated = addImageLayer(current, {
+        name: asset.name,
+        src: asset.src,
+        naturalWidth: asset.naturalWidth,
+        naturalHeight: asset.naturalHeight,
+        x,
+        y,
+      });
+      setSelectedId(updated.layers[updated.layers.length - 1]?.id ?? null);
+      return updated;
+    });
+    setStatus(position ? `${asset.name} agregado desde biblioteca en el lienzo.` : `${asset.name} agregado centrado como capa editable.`);
+  };
+
   return (
     <div className="app-shell">
       <Toolbar
@@ -179,6 +201,7 @@ export default function App() {
         brushColor={brushColor}
         brushWidth={brushWidth}
         stageRef={stageRef}
+        onAssetDrop={addAssetToProject}
       />
       <aside className="right-rail">
         <section className="panel ai-panel">
@@ -199,7 +222,7 @@ export default function App() {
             </div>
           )}
         </section>
-        <AssetLibrary project={project} setProject={setProject} setSelectedId={setSelectedId} onStatus={setStatus} />
+        <AssetLibrary onAddAsset={addAssetToProject} onStatus={setStatus} />
         <LayerPanel project={project} selectedId={selectedId} setProject={setProject} setSelectedId={setSelectedId} />
         <LayerProperties project={project} selectedId={selectedId} setProject={setProject} setSelectedId={setSelectedId} />
         <PreflightPanel project={project} />

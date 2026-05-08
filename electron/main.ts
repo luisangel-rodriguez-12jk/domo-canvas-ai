@@ -11,20 +11,45 @@ import { defaultSettings, mergeSettings } from '../src/core/settings';
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 let mainWindow: BrowserWindow | null = null;
-let updateStatus: UpdateStatus = { state: isDev ? 'disabled' : 'idle', message: isDev ? 'Auto-updates desactivados en modo desarrollo.' : 'Buscando actualizaciones al abrir…' };
+let updateStatus: UpdateStatus = { state: isDev ? 'disabled' : 'idle', message: isDev ? 'Auto-updates desactivados en modo desarrollo.' : 'Buscando actualizaciones antes de iniciar…' };
 let autoUpdateConfigured = false;
 let updateCheckStarted = false;
 let installTimer: NodeJS.Timeout | null = null;
+let rendererLoaded = false;
+let startupGateTimer: NodeJS.Timeout | null = null;
 
 const AUTO_INSTALL_DELAY_MS = 2500;
+const STARTUP_UPDATE_GATE_TIMEOUT_MS = 15000;
+
+function escapeHtml(message: string) {
+  return message.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
+}
 
 function setUpdateStatus(status: UpdateStatus) {
   updateStatus = status;
+  if (mainWindow && !rendererLoaded && !isDev) showStartupUpdateScreen(mainWindow, status);
   mainWindow?.webContents.send('update:status', status);
+}
+
+function loadRenderer(win: BrowserWindow, reason = 'update-ready') {
+  if (rendererLoaded) return;
+  rendererLoaded = true;
+  if (startupGateTimer) clearTimeout(startupGateTimer);
+  if (isDev) {
+    win.loadURL(process.env.VITE_DEV_SERVER_URL!).catch((error) => showRendererLoadError(win, error.message));
+  } else {
+    const rendererPath = path.join(__dirname, '../../dist/index.html');
+    win.loadFile(rendererPath).catch((error) => showRendererLoadError(win, `No se pudo abrir ${rendererPath}\n${error.message}`));
+  }
+  setUpdateStatus({ ...updateStatus, message: reason === 'timeout' ? 'No se confirmó update a tiempo; app iniciada sin cierre automático.' : updateStatus.message });
 }
 
 function installDownloadedUpdate(version?: string) {
   if (installTimer) clearTimeout(installTimer);
+  if (rendererLoaded) {
+    setUpdateStatus({ state: 'downloaded', message: `Actualización ${version ?? ''} lista. Se instalará cuando reinicies la app.`, version });
+    return;
+  }
   setUpdateStatus({ state: 'downloaded', message: `Actualización ${version ?? ''} lista. Reiniciando para instalar automáticamente…`, version });
   installTimer = setTimeout(() => {
     try {
@@ -32,17 +57,25 @@ function installDownloadedUpdate(version?: string) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setUpdateStatus({ state: 'error', message: `No se pudo reiniciar para instalar: ${message}` });
+      if (mainWindow) loadRenderer(mainWindow, 'update-install-error');
     }
   }, AUTO_INSTALL_DELAY_MS);
+}
+
+function continueStartupAfterUpdateCheck(reason: string) {
+  if (!mainWindow || rendererLoaded) return;
+  setTimeout(() => mainWindow && loadRenderer(mainWindow, reason), reason === 'timeout' ? 0 : 900);
 }
 
 function startAutoUpdateCheck() {
   if (isDev || updateCheckStarted) return;
   updateCheckStarted = true;
-  setUpdateStatus({ state: 'checking', message: 'Buscando actualizaciones al abrir…' });
+  setUpdateStatus({ state: 'checking', message: 'Buscando actualizaciones antes de iniciar…' });
+  startupGateTimer = setTimeout(() => continueStartupAfterUpdateCheck('timeout'), STARTUP_UPDATE_GATE_TIMEOUT_MS);
   autoUpdater.checkForUpdates().catch((error) => {
     updateCheckStarted = false;
     setUpdateStatus({ state: 'error', message: `No se pudo buscar actualización: ${error.message}` });
+    continueStartupAfterUpdateCheck('update-error');
   });
 }
 
@@ -56,15 +89,19 @@ function configureAutoUpdates(win: BrowserWindow) {
 
   if (!autoUpdateConfigured) {
     autoUpdateConfigured = true;
-    autoUpdater.on('checking-for-update', () => setUpdateStatus({ state: 'checking', message: 'Buscando actualizaciones al abrir…' }));
-    autoUpdater.on('update-available', (info) => setUpdateStatus({ state: 'available', message: `Actualización ${info.version} disponible. Descargando automáticamente…`, version: info.version }));
-    autoUpdater.on('update-not-available', (info) => setUpdateStatus({ state: 'not-available', message: `Ya tienes la versión más nueva (${info.version}).`, version: info.version }));
-    autoUpdater.on('download-progress', (progress) => setUpdateStatus({ state: 'downloading', message: `Descargando actualización… ${Math.round(progress.percent)}%`, progress: progress.percent }));
+    autoUpdater.on('checking-for-update', () => setUpdateStatus({ state: 'checking', message: 'Buscando actualizaciones antes de iniciar…' }));
+    autoUpdater.on('update-available', (info) => setUpdateStatus({ state: 'available', message: `Actualización ${info.version} disponible. Descargando antes de abrir el editor…`, version: info.version }));
+    autoUpdater.on('update-not-available', (info) => {
+      setUpdateStatus({ state: 'not-available', message: `Sin actualizaciones. Iniciando editor…`, version: info.version });
+      continueStartupAfterUpdateCheck('not-available');
+    });
+    autoUpdater.on('download-progress', (progress) => setUpdateStatus({ state: 'downloading', message: `Descargando actualización antes de iniciar… ${Math.round(progress.percent)}%`, progress: progress.percent }));
     autoUpdater.on('update-downloaded', (info) => installDownloadedUpdate(info.version));
-    autoUpdater.on('error', (error) => setUpdateStatus({ state: 'error', message: `No se pudo actualizar: ${error.message}` }));
+    autoUpdater.on('error', (error) => {
+      setUpdateStatus({ state: 'error', message: `No se pudo actualizar: ${error.message}. Iniciando editor…` });
+      continueStartupAfterUpdateCheck('update-error');
+    });
   }
-
-  setTimeout(startAutoUpdateCheck, 1000);
 }
 
 function getSettingsPath() {
@@ -255,8 +292,25 @@ async function openProject() {
   return { canceled: false, filePath, projectJson };
 }
 
+function showStartupUpdateScreen(win: BrowserWindow, status: UpdateStatus = updateStatus) {
+  const progress = typeof status.progress === 'number' ? Math.max(3, Math.min(100, Math.round(status.progress))) : 38;
+  const indeterminate = typeof status.progress !== 'number';
+  const message = escapeHtml(status.message);
+  const version = status.version ? `<p class="version">Versión detectada: ${escapeHtml(status.version)}</p>` : '';
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Domo Canvas AI</title><style>
+    :root{color-scheme:dark;font-family:Inter,Segoe UI,Arial,sans-serif;background:#08080b;color:#f7f7fb}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 30% 0%,rgba(255,42,85,.22),transparent 34%),#08080b;overflow:hidden}
+    main{width:min(560px,calc(100vw - 48px));padding:34px;border:1px solid #33202a;border-radius:28px;background:linear-gradient(180deg,#15151d,#0d0d13);box-shadow:0 24px 80px #0009;text-align:center}
+    .brand{letter-spacing:.2em;color:#ff2a55;font-size:13px;font-weight:900;margin-bottom:14px}.brand b{display:block;color:#fff;font-size:28px;letter-spacing:.08em;margin-top:4px}
+    h1{font-size:20px;margin:0 0 8px}.msg{color:#cfcfd8;line-height:1.5;margin:0 0 20px}.version{color:#9a9aaa;font-size:12px;margin:10px 0 0}
+    .bar{height:14px;border-radius:999px;background:#08080c;border:1px solid #30303d;overflow:hidden;position:relative}.fill{height:100%;width:${progress}%;background:linear-gradient(90deg,#ff2a55,#7a37ff);box-shadow:0 0 24px rgba(255,42,85,.45);border-radius:999px;${indeterminate ? 'animation:pulse 1.15s ease-in-out infinite alternate;' : ''}}
+    .foot{margin-top:18px;color:#898998;font-size:12px;line-height:1.45}@keyframes pulse{from{width:24%;transform:translateX(0)}to{width:62%;transform:translateX(60%)}}
+  </style></head><body><main><div class="brand">DOMO<b>CANVAS AI</b></div><h1>Buscando actualizaciones</h1><p class="msg">${message}</p><div class="bar"><div class="fill"></div></div>${version}<div class="foot">El editor se abrirá cuando confirme que no hay update pendiente. Así evitas empezar a trabajar y que la app se cierre a mitad del flujo.</div></main></body></html>`;
+  win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => undefined);
+}
+
 function showRendererLoadError(win: BrowserWindow, message: string) {
-  const escaped = message.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
+  const escaped = escapeHtml(message);
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Domo Canvas AI - error</title><style>
     body{margin:0;background:#08080b;color:#f7f7fb;font-family:Segoe UI,Arial,sans-serif;display:grid;place-items:center;min-height:100vh}
     main{max-width:760px;padding:32px;border:1px solid #33202a;border-radius:24px;background:#121218;box-shadow:0 20px 60px #0008}
@@ -295,10 +349,10 @@ function createWindow() {
   configureAutoUpdates(win);
 
   if (isDev) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL!).catch((error) => showRendererLoadError(win, error.message));
+    loadRenderer(win, 'dev');
   } else {
-    const rendererPath = path.join(__dirname, '../../dist/index.html');
-    win.loadFile(rendererPath).catch((error) => showRendererLoadError(win, `No se pudo abrir ${rendererPath}\n${error.message}`));
+    showStartupUpdateScreen(win);
+    setTimeout(startAutoUpdateCheck, 500);
   }
 }
 

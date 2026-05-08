@@ -27,7 +27,7 @@ export function createProject(name = 'Nuevo diseño Domo', width = 4500, height 
 
 export function addImageLayer(
   project: CanvasProject,
-  input: { name: string; src: string; naturalWidth: number; naturalHeight: number; asBackground?: boolean },
+  input: { name: string; src: string; naturalWidth: number; naturalHeight: number; asBackground?: boolean; x?: number; y?: number },
 ): CanvasProject {
   const maxWidth = input.asBackground ? project.width : Math.min(project.width * 0.42, input.naturalWidth);
   const scale = Math.min(1, maxWidth / Math.max(1, input.naturalWidth));
@@ -40,8 +40,8 @@ export function addImageLayer(
     src: input.src,
     naturalWidth: input.naturalWidth,
     naturalHeight: input.naturalHeight,
-    x: Math.round((project.width - width) / 2),
-    y: Math.round((project.height - height) / 2),
+    x: Math.round(input.x ?? (project.width - width) / 2),
+    y: Math.round(input.y ?? (project.height - height) / 2),
     width,
     height,
     rotation: 0,

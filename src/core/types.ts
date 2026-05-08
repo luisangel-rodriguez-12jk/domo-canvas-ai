@@ -24,6 +24,14 @@ export interface AppSettings {
   };
 }
 
+export interface LibraryAsset {
+  id: string;
+  name: string;
+  src: string;
+  naturalWidth: number;
+  naturalHeight: number;
+}
+
 export interface BaseLayer {
   id: string;
   name: string;

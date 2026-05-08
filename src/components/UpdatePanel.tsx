@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { UpdateStatus } from '../core/types';
 
-const defaultStatus: UpdateStatus = { state: 'idle', message: 'Buscando actualizaciones al abrir…' };
+const defaultStatus: UpdateStatus = { state: 'idle', message: 'La app revisa actualizaciones antes de abrir el editor.' };
 
 export function UpdatePanel() {
   const [status, setStatus] = useState<UpdateStatus>(defaultStatus);
