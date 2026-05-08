@@ -44,6 +44,36 @@ function loadRenderer(win: BrowserWindow, reason = 'update-ready') {
   setUpdateStatus({ ...updateStatus, message: reason === 'timeout' ? 'No se confirmó update a tiempo; app iniciada sin cierre automático.' : updateStatus.message });
 }
 
+async function clearStoredApiKey() {
+  const existing = await readSettings();
+  const toPersist = { ...existing, ai: { ...existing.ai, apiKey: '' } };
+  await fs.mkdir(path.dirname(getSettingsPath()), { recursive: true });
+  await fs.writeFile(getSettingsPath(), JSON.stringify(toPersist, null, 2), 'utf8');
+}
+
+async function hasStoredApiKey() {
+  try {
+    const raw = JSON.parse(await fs.readFile(getSettingsPath(), 'utf8'));
+    return Boolean(raw.ai?.apiKey);
+  } catch {
+    return false;
+  }
+}
+
+async function confirmPreserveApiKeysBeforeUpdate() {
+  if (!(await hasStoredApiKey())) return;
+  const result = await dialog.showMessageBox({
+    type: 'question',
+    title: 'Conservar APIs guardadas',
+    message: 'Domo Canvas AI detectó API keys guardadas localmente. ¿Quieres conservarlas después de actualizar?',
+    detail: 'Lo normal es conservarlas. Si eliges borrar, se eliminarán del archivo local de configuración antes de instalar la actualización.',
+    buttons: ['Conservar APIs guardadas', 'Borrar APIs guardadas'],
+    defaultId: 0,
+    cancelId: 0,
+  });
+  if (result.response === 1) await clearStoredApiKey();
+}
+
 function installDownloadedUpdate(version?: string) {
   if (installTimer) clearTimeout(installTimer);
   if (rendererLoaded) {
@@ -52,13 +82,13 @@ function installDownloadedUpdate(version?: string) {
   }
   setUpdateStatus({ state: 'downloaded', message: `Actualización ${version ?? ''} lista. Reiniciando para instalar automáticamente…`, version });
   installTimer = setTimeout(() => {
-    try {
-      autoUpdater.quitAndInstall(false, true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setUpdateStatus({ state: 'error', message: `No se pudo reiniciar para instalar: ${message}` });
-      if (mainWindow) loadRenderer(mainWindow, 'update-install-error');
-    }
+    confirmPreserveApiKeysBeforeUpdate()
+      .then(() => autoUpdater.quitAndInstall(false, true))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        setUpdateStatus({ state: 'error', message: `No se pudo reiniciar para instalar: ${message}` });
+        if (mainWindow) loadRenderer(mainWindow, 'update-install-error');
+      });
   }, AUTO_INSTALL_DELAY_MS);
 }
 

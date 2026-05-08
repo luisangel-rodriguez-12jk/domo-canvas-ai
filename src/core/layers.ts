@@ -1,5 +1,5 @@
 
-import type { CanvasLayer, CanvasProject, ImageLayer, TextLayer } from './types';
+import type { CanvasLayer, CanvasProject, ImageLayer, ShapeLayer, TextLayer } from './types';
 
 const now = () => new Date().toISOString();
 
@@ -57,25 +57,54 @@ export function addImageLayer(
   return touchProject({ ...project, layers: [...project.layers, layer] });
 }
 
-export function addTextLayer(project: CanvasProject, text = 'DOMO'): CanvasProject {
+export function addTextLayer(project: CanvasProject, text = 'DOMO', options: Partial<Pick<TextLayer, 'fontFamily' | 'fontSize' | 'fill' | 'align'>> = {}): CanvasProject {
+  const fontSize = options.fontSize ?? 220;
+  const lineCount = Math.max(1, text.split('\n').length);
   const layer: TextLayer = {
     id: createId('text'),
     type: 'text',
-    name: `Texto: ${text.slice(0, 18)}`,
+    name: `Texto: ${text.replace(/\s+/g, ' ').slice(0, 18)}`,
     text,
-    fontFamily: 'Impact, Arial Black, Arial, sans-serif',
-    fontSize: 220,
+    fontFamily: options.fontFamily ?? 'Impact, Arial Black, Arial, sans-serif',
+    fontSize,
     fontStyle: 'normal',
-    fill: '#ffffff',
-    align: 'center',
+    fill: options.fill ?? '#ffffff',
+    align: options.align ?? 'center',
     x: Math.round(project.width / 2),
     y: Math.round(project.height / 2),
     width: 1200,
-    height: 300,
+    height: Math.max(300, Math.round(fontSize * 1.28 * lineCount)),
     rotation: 0,
     opacity: 1,
     visible: true,
     locked: false,
+  };
+  return touchProject({ ...project, layers: [...project.layers, layer] });
+}
+
+export function addShapeLayer(
+  project: CanvasProject,
+  shape: ShapeLayer['shape'],
+  options: Partial<Pick<ShapeLayer, 'stroke' | 'strokeWidth' | 'fill' | 'x' | 'y' | 'width' | 'height'>> = {},
+): CanvasProject {
+  const width = options.width ?? (shape === 'line' ? 1100 : 900);
+  const height = options.height ?? (shape === 'line' ? 0 : 900);
+  const layer: ShapeLayer = {
+    id: createId('shape'),
+    type: 'shape',
+    shape,
+    name: shape === 'rect' ? 'Rectángulo' : shape === 'circle' ? 'Círculo' : 'Línea',
+    x: Math.round(options.x ?? (project.width - width) / 2),
+    y: Math.round(options.y ?? (shape === 'line' ? project.height / 2 : (project.height - height) / 2)),
+    width,
+    height,
+    rotation: 0,
+    opacity: 1,
+    visible: true,
+    locked: false,
+    stroke: options.stroke ?? '#ffffff',
+    strokeWidth: options.strokeWidth ?? 16,
+    fill: options.fill ?? 'transparent',
   };
   return touchProject({ ...project, layers: [...project.layers, layer] });
 }

@@ -1,7 +1,6 @@
-
 import type { ReactNode } from 'react';
-import { Brush, Eraser, FileDown, FilePlus2, FolderOpen, ImagePlus, MousePointer2, PenLine, Save, Sparkles, Type, Wand2 } from 'lucide-react';
-import type { ToolMode } from '../core/types';
+import { Brush, Circle, Eraser, FileDown, FilePlus2, FolderOpen, ImagePlus, Minus, MousePointer2, PenLine, Save, Sparkles, Square, Type, Wand2 } from 'lucide-react';
+import type { ShapeLayer, ToolMode } from '../core/types';
 import type { ExportMode } from '../core/exporter';
 
 interface Props {
@@ -11,6 +10,9 @@ interface Props {
   setBrushColor: (color: string) => void;
   brushWidth: number;
   setBrushWidth: (width: number) => void;
+  shapeFill: string;
+  setShapeFill: (color: string) => void;
+  onAddShape: (shape: ShapeLayer['shape']) => void;
   onAddImage: (asBackground?: boolean) => void;
   onAddText: () => void;
   onExport: (mode: ExportMode) => void;
@@ -20,32 +22,56 @@ interface Props {
   onGenerate: () => void;
 }
 
+const colors = ['#ffffff', '#000000', '#ff2a55', '#7a37ff', '#00ff88', '#ffcc00', '#00d4ff', '#f4efe8'];
+
 export function Toolbar(props: Props) {
-  const toolButton = (id: ToolMode, label: string, icon: ReactNode) => (
-    <button className={props.tool === id ? 'active' : ''} onClick={() => props.setTool(id)} title={label}>{icon}<span>{label}</span></button>
+  const tooltipButton = (label: string, description: string, icon: ReactNode, onClick: () => void, className = '') => (
+    <button className={className} onClick={onClick} title={description} data-tooltip={description}>{icon}<span>{label}</span></button>
   );
+  const toolButton = (id: ToolMode, label: string, description: string, icon: ReactNode) => (
+    tooltipButton(label, description, icon, () => props.setTool(id), props.tool === id ? 'active' : '')
+  );
+  const isPaintTool = ['brush', 'eraser', 'ai-mask'].includes(props.tool);
+
   return (
     <aside className="toolbar">
       <div className="brand-mark">DOMO<br /><b>CANVAS AI</b></div>
-      {toolButton('select', 'Mover', <MousePointer2 size={18} />)}
-      {toolButton('brush', 'Pincel', <Brush size={18} />)}
-      {toolButton('eraser', 'Borrar', <Eraser size={18} />)}
-      {toolButton('ai-mask', 'Máscara IA', <PenLine size={18} />)}
-      {toolButton('text', 'Texto', <Type size={18} />)}
-      <div className="toolbar-control">
-        <input type="color" value={props.brushColor} onChange={(event) => props.setBrushColor(event.target.value)} />
-        <input type="range" min={4} max={120} value={props.brushWidth} onChange={(event) => props.setBrushWidth(Number(event.target.value))} />
-        <span>{props.brushWidth}px</span>
+      {toolButton('select', 'Mover', 'Selecciona, mueve y transforma capas sin dibujar accidentalmente.', <MousePointer2 size={18} />)}
+      {toolButton('brush', 'Pincel', 'Dibuja trazos libres. Al activarlo aparece paleta de color y grosor.', <Brush size={18} />)}
+      {toolButton('eraser', 'Borrar', 'Borra trazos manuales usando el grosor elegido.', <Eraser size={18} />)}
+      {toolButton('ai-mask', 'Máscara IA', 'Marca zonas donde quieres que la IA intervenga más.', <PenLine size={18} />)}
+      {toolButton('text', 'Texto', 'Agrega texto y edítalo directamente con doble clic sobre el lienzo.', <Type size={18} />)}
+      {isPaintTool && (
+        <div className="brush-palette" data-tooltip="Paleta rápida: color, grosor y presets del pincel actual.">
+          <div className="palette-colors">
+            {colors.map((color) => (
+              <button key={color} className={props.brushColor === color ? 'swatch active' : 'swatch'} style={{ background: color }} onClick={() => props.setBrushColor(color)} title={color} />
+            ))}
+          </div>
+          <input type="color" value={props.brushColor} onChange={(event) => props.setBrushColor(event.target.value)} title="Color personalizado" />
+          <input type="range" min={4} max={140} value={props.brushWidth} onChange={(event) => props.setBrushWidth(Number(event.target.value))} title="Grosor del pincel" />
+          <span>{props.brushWidth}px</span>
+        </div>
+      )}
+      <div className="shape-tools">
+        <div className="mini-title">Formas</div>
+        {tooltipButton('Línea', 'Inserta una línea editable con el color/grosor actual.', <Minus size={18} />, () => props.onAddShape('line'))}
+        {tooltipButton('Rect', 'Inserta un rectángulo editable. Usa relleno transparente o color.', <Square size={18} />, () => props.onAddShape('rect'))}
+        {tooltipButton('Círculo', 'Inserta un círculo editable. Usa relleno transparente o color.', <Circle size={18} />, () => props.onAddShape('circle'))}
+        <div className="toolbar-control compact" data-tooltip="Relleno para nuevas formas. Transparente deja solo contorno.">
+          <input type="color" value={props.shapeFill === 'transparent' ? '#111111' : props.shapeFill} onChange={(event) => props.setShapeFill(event.target.value)} />
+          <button onClick={() => props.setShapeFill('transparent')}>Sin relleno</button>
+        </div>
       </div>
-      <button onClick={() => props.onAddImage(true)}><ImagePlus size={18} /><span>Fondo</span></button>
-      <button onClick={() => props.onAddImage(false)}><ImagePlus size={18} /><span>PNG/logo</span></button>
-      <button onClick={props.onAddText}><Type size={18} /><span>Agregar texto</span></button>
-      <button onClick={props.onGenerate} className="glow"><Sparkles size={18} /><span>Generar IA</span></button>
-      <button onClick={() => props.onExport('mockup-preview')}><Save size={18} /><span>Exportar mockup</span></button>
-      <button onClick={() => props.onExport('transparent-artwork')}><Save size={18} /><span>Arte PNG</span></button>
-      <button onClick={props.onNewProject}><FilePlus2 size={18} /><span>Nuevo</span></button>
-      <button onClick={props.onSaveProject}><FileDown size={18} /><span>Guardar</span></button>
-      <button onClick={props.onOpenProject}><FolderOpen size={18} /><span>Abrir</span></button>
+      {tooltipButton('Fondo', 'Carga una imagen como fondo/mockup; después activa Mover automáticamente.', <ImagePlus size={18} />, () => props.onAddImage(true))}
+      {tooltipButton('PNG/logo', 'Carga una imagen como capa editable; después activa Mover automáticamente.', <ImagePlus size={18} />, () => props.onAddImage(false))}
+      {tooltipButton('Agregar texto', 'Crea una capa de texto multilínea editable en el lienzo.', <Type size={18} />, props.onAddText)}
+      {tooltipButton('Generar IA', 'Envía composición y prompt a la IA configurada.', <Sparkles size={18} />, props.onGenerate, 'glow')}
+      {tooltipButton('Exportar mockup', 'Guarda una vista PNG completa con fondo y guías visibles.', <Save size={18} />, () => props.onExport('mockup-preview'))}
+      {tooltipButton('Arte PNG', 'Guarda solo el arte imprimible con transparencia.', <Save size={18} />, () => props.onExport('transparent-artwork'))}
+      {tooltipButton('Nuevo', 'Crea un diseño nuevo; si hay cambios pregunta si quieres guardar.', <FilePlus2 size={18} />, props.onNewProject)}
+      {tooltipButton('Guardar', 'Guarda el proyecto editable .domo.json.', <FileDown size={18} />, props.onSaveProject)}
+      {tooltipButton('Abrir', 'Abre un proyecto .domo.json guardado.', <FolderOpen size={18} />, props.onOpenProject)}
       <div className="toolbar-footer"><Wand2 size={16}/> App local Windows</div>
     </aside>
   );

@@ -1,4 +1,4 @@
-import type { CanvasLayer, CanvasProject } from '../core/types';
+import type { CanvasLayer, CanvasProject, ShapeLayer } from '../core/types';
 import { duplicateLayer, updateLayer } from '../core/layers';
 
 interface Props {
@@ -8,13 +8,23 @@ interface Props {
   setSelectedId: (id: string | null) => void;
 }
 
+export const fontOptions = [
+  'Impact, Arial Black, Arial, sans-serif',
+  'Bebas Neue, Impact, sans-serif',
+  'Oswald, Arial, sans-serif',
+  'Montserrat, Arial, sans-serif',
+  'Georgia, Times New Roman, serif',
+  'Courier New, monospace',
+  'Arial Black, Arial, sans-serif',
+];
+
 export function LayerProperties({ project, selectedId, setProject, setSelectedId }: Props) {
   const layer = project.layers.find((item) => item.id === selectedId);
   if (!layer) {
     return (
       <section className="panel properties-panel">
         <div className="panel-title">Propiedades</div>
-        <p className="hint">Selecciona una capa para ajustar nombre, opacidad, tamaño, rotación y texto.</p>
+        <p className="hint">Selecciona una capa para ajustar nombre, opacidad, tamaño, rotación, texto, fuente o forma.</p>
       </section>
     );
   }
@@ -46,7 +56,7 @@ export function LayerProperties({ project, selectedId, setProject, setSelectedId
         </label>
         <label>
           Alto
-          <input type="number" min={1} value={Math.round(layer.height)} onChange={(event) => numberPatch('height', event.target.value)} />
+          <input type="number" min={0} value={Math.round(layer.height)} onChange={(event) => numberPatch('height', event.target.value)} />
         </label>
       </div>
       <div className="grid-2">
@@ -62,8 +72,14 @@ export function LayerProperties({ project, selectedId, setProject, setSelectedId
       {layer.type === 'text' && (
         <>
           <label>
-            Texto
-            <textarea value={layer.text} onChange={(event) => patch({ text: event.target.value, name: `Texto: ${event.target.value.slice(0, 18)}` } as Partial<CanvasLayer>)} />
+            Texto multilínea
+            <textarea value={layer.text} onChange={(event) => patch({ text: event.target.value, name: `Texto: ${event.target.value.replace(/\s+/g, ' ').slice(0, 18)}` } as Partial<CanvasLayer>)} />
+          </label>
+          <label>
+            Fuente
+            <select value={layer.fontFamily} onChange={(event) => patch({ fontFamily: event.target.value } as Partial<CanvasLayer>)}>
+              {fontOptions.map((font) => <option key={font} value={font}>{font.split(',')[0]}</option>)}
+            </select>
           </label>
           <div className="grid-2">
             <label>
@@ -75,6 +91,43 @@ export function LayerProperties({ project, selectedId, setProject, setSelectedId
               <input type="color" value={layer.fill} onChange={(event) => patch({ fill: event.target.value } as Partial<CanvasLayer>)} />
             </label>
           </div>
+          <label>
+            Alineación
+            <select value={layer.align} onChange={(event) => patch({ align: event.target.value as 'left' | 'center' | 'right' } as Partial<CanvasLayer>)}>
+              <option value="left">Izquierda</option>
+              <option value="center">Centro</option>
+              <option value="right">Derecha</option>
+            </select>
+          </label>
+        </>
+      )}
+      {layer.type === 'shape' && (
+        <>
+          <label>
+            Tipo de forma
+            <select value={layer.shape} onChange={(event) => patch({ shape: event.target.value as ShapeLayer['shape'] } as Partial<CanvasLayer>)}>
+              <option value="line">Línea</option>
+              <option value="rect">Rectángulo</option>
+              <option value="circle">Círculo</option>
+            </select>
+          </label>
+          <div className="grid-2">
+            <label>
+              Contorno
+              <input type="color" value={layer.stroke} onChange={(event) => patch({ stroke: event.target.value } as Partial<CanvasLayer>)} />
+            </label>
+            <label>
+              Grosor
+              <input type="number" min={1} max={180} value={layer.strokeWidth} onChange={(event) => patch({ strokeWidth: Number(event.target.value) } as Partial<CanvasLayer>)} />
+            </label>
+          </div>
+          <label>
+            Relleno
+            <div className="inline-fill-control">
+              <input type="color" value={layer.fill === 'transparent' ? '#111111' : layer.fill} onChange={(event) => patch({ fill: event.target.value } as Partial<CanvasLayer>)} />
+              <button onClick={() => patch({ fill: 'transparent' } as Partial<CanvasLayer>)}>Sin relleno</button>
+            </div>
+          </label>
         </>
       )}
       <button

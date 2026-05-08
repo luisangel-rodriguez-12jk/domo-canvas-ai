@@ -1,18 +1,22 @@
-
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from 'react';
 import { Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
-import type { CanvasLayer, CanvasProject, ImageLayer, LibraryAsset, Stroke, ToolMode } from '../core/types';
+import type { CanvasLayer, CanvasProject, ImageLayer, LibraryAsset, ShapeLayer, Stroke, TextLayer, ToolMode } from '../core/types';
 import { createId, moveLayer, touchProject, updateLayer } from '../core/layers';
 
 function useHtmlImage(src?: string) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   useEffect(() => {
     if (!src) { setImage(null); return; }
+    let cancelled = false;
+    setImage(null);
     const img = new window.Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => setImage(img);
+    img.onload = () => { if (!cancelled) setImage(img); };
+    img.onerror = () => { if (!cancelled) setImage(null); };
     img.src = src;
+    if (img.complete && img.naturalWidth > 0) setImage(img);
+    return () => { cancelled = true; };
   }, [src]);
   return image;
 }
@@ -53,6 +57,52 @@ function ImageNode({ layer, onSelect, onChange, nodeName = 'editable-node' }: { 
   );
 }
 
+function ShapeNode({ layer, onSelect, onChange }: { layer: ShapeLayer; onSelect: () => void; onChange: (patch: Partial<CanvasLayer>) => void }) {
+  const common = {
+    id: layer.id,
+    name: 'editable-node',
+    x: layer.x,
+    y: layer.y,
+    rotation: layer.rotation,
+    opacity: layer.opacity,
+    visible: layer.visible,
+    draggable: !layer.locked,
+    stroke: layer.stroke,
+    strokeWidth: layer.strokeWidth,
+    fill: layer.fill === 'transparent' ? undefined : layer.fill,
+    onClick: onSelect,
+    onTap: onSelect,
+    onDragEnd: (event: Konva.KonvaEventObject<globalThis.DragEvent>) => onChange({ x: Math.round(event.target.x()), y: Math.round(event.target.y()) }),
+    onTransformEnd: (event: Konva.KonvaEventObject<Event>) => {
+      const node = event.target;
+      const scaleX = node.scaleX();
+      const scaleY = node.scaleY();
+      node.scaleX(1);
+      node.scaleY(1);
+      onChange({
+        x: Math.round(node.x()),
+        y: Math.round(node.y()),
+        width: Math.max(1, Math.round(node.width() * scaleX)),
+        height: layer.shape === 'line' ? Math.round(node.height() * scaleY) : Math.max(1, Math.round(node.height() * scaleY)),
+        rotation: Math.round(node.rotation()),
+      });
+    },
+  };
+
+  if (layer.shape === 'line') {
+    return <Line {...common} points={[0, 0, layer.width, layer.height]} lineCap="round" lineJoin="round" />;
+  }
+
+  return (
+    <Rect
+      {...common}
+      width={layer.width}
+      height={layer.height}
+      cornerRadius={layer.shape === 'circle' ? Math.min(layer.width, layer.height) / 2 : 0}
+    />
+  );
+}
+
 interface Props {
   project: CanvasProject;
   setProject: (project: CanvasProject) => void;
@@ -70,6 +120,8 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 900, height: 780 });
   const [isDrawing, setIsDrawing] = useState(false);
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [editingTextValue, setEditingTextValue] = useState('');
 
   useEffect(() => {
     const resize = () => {
@@ -84,11 +136,12 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
   const scale = useMemo(() => Math.min(containerSize.width / project.width, containerSize.height / project.height), [containerSize, project.width, project.height]);
   const stageWidth = Math.round(project.width * scale);
   const stageHeight = Math.round(project.height * scale);
+  const editingLayer = project.layers.find((layer): layer is TextLayer => layer.id === editingTextId && layer.type === 'text') ?? null;
 
   useEffect(() => {
     const transformer = transformerRef.current;
     const stage = stageRef.current;
-    if (!transformer || !stage || !selectedId) {
+    if (!transformer || !stage || !selectedId || editingTextId) {
       transformer?.nodes([]);
       return;
     }
@@ -97,7 +150,7 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
     if (selected && layer && !layer.locked) transformer.nodes([selected]);
     else transformer.nodes([]);
     transformer.getLayer()?.batchDraw();
-  }, [selectedId, project.layers, stageRef]);
+  }, [selectedId, project.layers, stageRef, editingTextId]);
 
   const pointer = () => {
     const position = stageRef.current?.getPointerPosition();
@@ -134,6 +187,23 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
 
   const stopDrawing = () => setIsDrawing(false);
 
+  const beginTextEdit = (layer: TextLayer) => {
+    setSelectedId(layer.id);
+    setEditingTextId(layer.id);
+    setEditingTextValue(layer.text);
+  };
+
+  const commitTextEdit = () => {
+    if (!editingLayer) return;
+    const lineCount = Math.max(1, editingTextValue.split('\n').length);
+    setProject(updateLayer(project, editingLayer.id, {
+      text: editingTextValue,
+      name: `Texto: ${editingTextValue.replace(/\s+/g, ' ').slice(0, 18)}`,
+      height: Math.max(editingLayer.height, Math.round(editingLayer.fontSize * 1.28 * lineCount)),
+    } as Partial<CanvasLayer>));
+    setEditingTextId(null);
+  };
+
   const getProjectPointFromClient = (clientX: number, clientY: number) => {
     const stage = stageRef.current;
     const rect = stage?.container().getBoundingClientRect();
@@ -144,7 +214,7 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
     };
   };
 
-  const handleAssetDrop = (event: DragEvent<HTMLDivElement>) => {
+  const handleAssetDrop = (event: ReactDragEvent<HTMLDivElement>) => {
     const raw = event.dataTransfer.getData('application/x-domo-asset');
     if (!raw || !onAssetDrop) return;
     event.preventDefault();
@@ -156,6 +226,18 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
       // Ignore unrelated drags.
     }
   };
+
+  const textEditStyle: CSSProperties | undefined = editingLayer ? {
+    position: 'absolute',
+    left: `calc(50% - ${stageWidth / 2}px + ${(editingLayer.x - editingLayer.width / 2) * scale}px)`,
+    top: `calc(50% - ${stageHeight / 2}px + ${(editingLayer.y - editingLayer.height / 2) * scale}px)`,
+    width: Math.max(90, editingLayer.width * scale),
+    minHeight: Math.max(42, editingLayer.height * scale),
+    fontFamily: editingLayer.fontFamily,
+    fontSize: Math.max(12, editingLayer.fontSize * scale),
+    color: editingLayer.fill,
+    textAlign: editingLayer.align,
+  } : undefined;
 
   return (
     <main
@@ -194,6 +276,9 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
               if (layer.type === 'image') {
                 return <ImageNode key={layer.id} layer={layer} onSelect={() => setSelectedId(layer.id)} onChange={(patch) => setProject(moveLayer(project, layer.id, patch))} />;
               }
+              if (layer.type === 'shape') {
+                return <ShapeNode key={layer.id} layer={layer} onSelect={() => setSelectedId(layer.id)} onChange={(patch) => setProject(moveLayer(project, layer.id, patch))} />;
+              }
               return (
                 <Text
                   key={layer.id}
@@ -205,18 +290,21 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
                   width={layer.width}
                   height={layer.height}
                   rotation={layer.rotation}
-                  opacity={layer.opacity}
+                  opacity={editingTextId === layer.id ? 0 : layer.opacity}
                   visible={layer.visible}
                   fontFamily={layer.fontFamily}
                   fontSize={layer.fontSize}
                   fontStyle={layer.fontStyle}
                   fill={layer.fill}
                   align={layer.align}
+                  verticalAlign="middle"
                   offsetX={layer.width / 2}
                   offsetY={layer.height / 2}
-                  draggable={!layer.locked}
+                  draggable={!layer.locked && editingTextId !== layer.id}
                   onClick={() => setSelectedId(layer.id)}
                   onTap={() => setSelectedId(layer.id)}
+                  onDblClick={() => beginTextEdit(layer)}
+                  onDblTap={() => beginTextEdit(layer)}
                   onDragEnd={(event) => setProject(moveLayer(project, layer.id, { x: Math.round(event.target.x()), y: Math.round(event.target.y()) }))}
                   onTransformEnd={(event) => {
                     const node = event.target as Konva.Text;
@@ -251,6 +339,20 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
           </Group>
         </Layer>
       </Stage>
+      {editingLayer && (
+        <textarea
+          className="text-edit-overlay"
+          autoFocus
+          value={editingTextValue}
+          onChange={(event) => setEditingTextValue(event.target.value)}
+          onBlur={commitTextEdit}
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') commitTextEdit();
+            if (event.key === 'Escape') setEditingTextId(null);
+          }}
+          style={textEditStyle}
+        />
+      )}
       <div className="canvas-meta">Lienzo {project.width}×{project.height}px · escala {(scale * 100).toFixed(1)}%</div>
     </main>
   );

@@ -1,5 +1,4 @@
-
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type Konva from 'konva';
 import { AssetLibrary } from './components/AssetLibrary';
 import { CanvasEditor } from './components/CanvasEditor';
@@ -9,14 +8,14 @@ import { PreflightPanel } from './components/PreflightPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { Toolbar } from './components/Toolbar';
 import { UpdatePanel } from './components/UpdatePanel';
-import { addImageLayer, addTextLayer, createProject, touchProject } from './core/layers';
+import { addImageLayer, addShapeLayer, addTextLayer, createProject, touchProject } from './core/layers';
 import { buildPrintAwarePrompt } from './core/aiPrompt';
 import { createMockAiPreview } from './core/mockAi';
 import { applyPromptPreset, promptPresets } from './core/presets';
 import { exportStageDataUrl, makeExportFileName, type ExportMode } from './core/exporter';
 import { createProjectSnapshot, loadProjectSnapshot, makeSafeFileName } from './core/projectIO';
 import { defaultSettings, mergeSettings } from './core/settings';
-import type { AiHistoryItem, AppSettings, CanvasProject, LibraryAsset, ToolMode } from './core/types';
+import type { AiHistoryItem, AppSettings, CanvasProject, LibraryAsset, ShapeLayer, ToolMode } from './core/types';
 
 async function readImageFile(file: File) {
   const src = await new Promise<string>((resolve, reject) => {
@@ -34,20 +33,70 @@ async function readImageFile(file: File) {
   return { src, width: image.naturalWidth, height: image.naturalHeight };
 }
 
+const isTextEntry = (target: EventTarget | null) => {
+  const element = target as HTMLElement | null;
+  if (!element) return false;
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName) || element.isContentEditable;
+};
+
 export default function App() {
   const [project, setProject] = useState<CanvasProject>(() => createProject('Domo playera 01'));
+  const [undoStack, setUndoStack] = useState<CanvasProject[]>([]);
+  const [isDirty, setIsDirty] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [tool, setTool] = useState<ToolMode>('select');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [brushColor, setBrushColor] = useState('#ffffff');
   const [brushWidth, setBrushWidth] = useState(24);
-  const [prompt, setPrompt] = useState('Integra las capas y rayones en un diseño streetwear para playera negra, alto contraste, fondo transparente, listo para impresión.');
+  const [shapeFill, setShapeFill] = useState('transparent');
+  const [prompt, setPrompt] = useState('Integra las capas y rayones en un diseño streetwear para playera negra, alto contraste, ultrarrealista, fondo transparente, listo para impresión.');
+  const [aiRevisionPrompt, setAiRevisionPrompt] = useState('');
   const [status, setStatus] = useState('Listo. Puedes cargar fondo, logos PNG y dibujar encima.');
   const [aiOutput, setAiOutput] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const projectRef = useRef(project);
   const stageRef = useRef<Konva.Stage | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingBackgroundRef = useRef(false);
+
+  useEffect(() => { projectRef.current = project; }, [project]);
+
+  const commitProject = useCallback((next: CanvasProject | ((current: CanvasProject) => CanvasProject), markDirty = true) => {
+    setProject((current) => {
+      const updated = typeof next === 'function' ? next(current) : next;
+      if (updated !== current) {
+        setUndoStack((stack) => [current, ...stack].slice(0, 60));
+        if (markDirty) setIsDirty(true);
+      }
+      return updated;
+    });
+  }, []);
+
+  const undoLast = useCallback(() => {
+    setUndoStack((stack) => {
+      const [previous, ...rest] = stack;
+      if (!previous) {
+        setStatus('No hay más cambios para deshacer.');
+        return stack;
+      }
+      setProject(previous);
+      setSelectedId(null);
+      setIsDirty(true);
+      setStatus('Cambio deshecho con Ctrl+Z.');
+      return rest;
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey && !isTextEntry(event.target)) {
+        event.preventDefault();
+        undoLast();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undoLast]);
 
   useEffect(() => {
     window.domo?.getSettings().then((loaded) => setSettings(mergeSettings(loaded))).catch(() => setSettings(defaultSettings));
@@ -55,6 +104,7 @@ export default function App() {
 
   const addImage = (asBackground = false) => {
     pendingBackgroundRef.current = asBackground;
+    if (fileInputRef.current) fileInputRef.current.value = '';
     fileInputRef.current?.click();
   };
 
@@ -62,10 +112,17 @@ export default function App() {
     const file = files?.[0];
     if (!file) return;
     setStatus(`Cargando ${file.name}…`);
-    const loaded = await readImageFile(file);
-    setProject((current) => addImageLayer(current, { name: file.name, src: loaded.src, naturalWidth: loaded.width, naturalHeight: loaded.height, asBackground: pendingBackgroundRef.current }));
-    setStatus(pendingBackgroundRef.current ? 'Fondo cargado.' : 'Imagen/PNG agregado como capa editable.');
-    pendingBackgroundRef.current = false;
+    try {
+      const loaded = await readImageFile(file);
+      commitProject((current) => addImageLayer(current, { name: file.name, src: loaded.src, naturalWidth: loaded.width, naturalHeight: loaded.height, asBackground: pendingBackgroundRef.current }));
+      setTool('select');
+      setStatus(pendingBackgroundRef.current ? 'Fondo cargado. Herramienta Mover activada para evitar rayones accidentales.' : 'Imagen/PNG agregado como capa editable. Herramienta Mover activada.');
+    } catch (error) {
+      setStatus(error instanceof Error ? `No se pudo cargar la imagen: ${error.message}` : 'No se pudo cargar la imagen.');
+    } finally {
+      pendingBackgroundRef.current = false;
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const exportCanvas = async (mode: ExportMode) => {
@@ -77,18 +134,38 @@ export default function App() {
     setStatus(result?.canceled ? 'Exportación cancelada.' : `PNG ${label} guardado: ${result?.filePath}`);
   };
 
-  const newProject = () => {
-    setProject(createProject(`Domo playera ${new Date().toLocaleDateString('es-MX')}`));
-    setSelectedId(null);
-    setAiOutput(null);
-    setStatus('Proyecto nuevo creado.');
+  const saveProjectFile = async () => {
+    const snapshot = createProjectSnapshot(projectRef.current);
+    const json = JSON.stringify(snapshot, null, 2);
+    const result = await window.domo?.saveProject(json, `${makeSafeFileName(projectRef.current.name)}.domo.json`);
+    if (!result || result.canceled) {
+      setStatus('Guardado de proyecto cancelado.');
+      return false;
+    }
+    setIsDirty(false);
+    setStatus(`Proyecto guardado: ${result.filePath}`);
+    return true;
   };
 
-  const saveProjectFile = async () => {
-    const snapshot = createProjectSnapshot(project);
-    const json = JSON.stringify(snapshot, null, 2);
-    const result = await window.domo?.saveProject(json, `${makeSafeFileName(project.name)}.domo.json`);
-    setStatus(result?.canceled ? 'Guardado de proyecto cancelado.' : `Proyecto guardado: ${result?.filePath}`);
+  const newProject = async () => {
+    if (isDirty) {
+      const wantsSave = window.confirm('Hay cambios sin guardar. ¿Quieres guardar antes de crear un diseño nuevo?');
+      if (wantsSave) {
+        const saved = await saveProjectFile();
+        if (!saved) return;
+      } else if (!window.confirm('Crear diseño nuevo sin guardar los cambios actuales?')) {
+        setStatus('Proyecto nuevo cancelado para conservar el diseño actual.');
+        return;
+      }
+    }
+    setProject(createProject(`Domo playera ${new Date().toLocaleDateString('es-MX')}`));
+    setUndoStack([]);
+    setIsDirty(false);
+    setSelectedId(null);
+    setTool('select');
+    setAiOutput(null);
+    setAiRevisionPrompt('');
+    setStatus('Proyecto nuevo creado.');
   };
 
   const openProjectFile = async () => {
@@ -100,7 +177,10 @@ export default function App() {
       }
       const loaded = loadProjectSnapshot(result.projectJson);
       setProject(loaded);
+      setUndoStack([]);
+      setIsDirty(false);
       setSelectedId(null);
+      setTool('select');
       setAiOutput(loaded.aiHistory[0]?.output ?? null);
       setStatus(`Proyecto abierto: ${result.filePath}`);
     } catch (error) {
@@ -111,17 +191,20 @@ export default function App() {
   const saveSettings = async () => {
     const saved = await window.domo?.saveSettings(settings);
     if (saved) setSettings(saved);
-    setStatus('Configuración guardada localmente.');
+    const message = 'Configuración guardada localmente. Tus API keys quedaron en el perfil local de Domo Canvas AI.';
+    setStatus(message);
+    window.alert(message);
   };
 
-  const generateAi = async () => {
+  const generateAi = async (promptOverride?: string) => {
     const stage = stageRef.current;
     if (!stage) return;
+    const activePrompt = promptOverride ?? prompt;
     setIsGenerating(true);
-    setStatus('Componiendo imagen y enviando a IA…');
+    setStatus('Componiendo imagen ultrarrealista y enviando a IA…');
     try {
-      const compositionPng = stage.toDataURL({ mimeType: 'image/png', pixelRatio: Math.max(1, project.width / stage.width()) });
-      const request = { prompt, compositionPng, project, settings: settings.ai };
+      const compositionPng = stage.toDataURL({ mimeType: 'image/png', pixelRatio: Math.max(1, projectRef.current.width / stage.width()) });
+      const request = { prompt: activePrompt, compositionPng, project: projectRef.current, settings: settings.ai };
       const response = window.domo ? await window.domo.generateImage(request) : createMockAiPreview(request);
       setAiOutput(response.imageDataUrl);
       const history: AiHistoryItem = {
@@ -129,11 +212,11 @@ export default function App() {
         createdAt: new Date().toISOString(),
         provider: response.provider,
         model: response.model,
-        prompt: buildPrintAwarePrompt(prompt, project, settings.ai),
+        prompt: buildPrintAwarePrompt(activePrompt, projectRef.current, settings.ai),
         output: response.imageDataUrl,
       };
-      setProject((current) => touchProject({ ...current, aiHistory: [history, ...current.aiHistory].slice(0, 20) }));
-      setStatus(`IA completada con ${response.provider}/${response.model}.`);
+      commitProject((current) => touchProject({ ...current, aiHistory: [history, ...current.aiHistory].slice(0, 20) }));
+      setStatus(`IA completada con ${response.provider}/${response.model}. Puedes guardarla, pegarla como capa o regenerarla con cambios.`);
     } catch (error) {
       setStatus(error instanceof Error ? `Error IA: ${error.message}` : 'Error IA desconocido.');
     } finally {
@@ -141,15 +224,27 @@ export default function App() {
     }
   };
 
+  const regenerateAiWithChanges = () => {
+    const changes = aiRevisionPrompt.trim();
+    void generateAi(changes ? `${prompt}\n\nCambios para regenerar: ${changes}` : prompt);
+  };
+
+  const saveAiOutput = async () => {
+    if (!aiOutput) return;
+    const result = await window.domo?.saveDataUrl(aiOutput, `${makeSafeFileName(project.name)}-resultado-ia.png`);
+    setStatus(result?.canceled ? 'Guardado de resultado IA cancelado.' : `Resultado IA guardado: ${result?.filePath}`);
+  };
+
   const addGeneratedAsLayer = async () => {
     if (!aiOutput) return;
     const image = await new Promise<HTMLImageElement>((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = aiOutput; });
-    setProject((current) => addImageLayer(current, { name: 'Resultado IA', src: aiOutput, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight }));
-    setStatus('Resultado IA agregado al lienzo como capa.');
+    commitProject((current) => addImageLayer(current, { name: 'Resultado IA', src: aiOutput, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight }));
+    setTool('select');
+    setStatus('Resultado IA agregado al lienzo como capa. Herramienta Mover activada.');
   };
 
   const addAssetToProject = (asset: LibraryAsset, position?: { x: number; y: number }) => {
-    setProject((current) => {
+    commitProject((current) => {
       const maxWidth = Math.min(current.width * 0.42, asset.naturalWidth);
       const scale = Math.min(1, maxWidth / Math.max(1, asset.naturalWidth));
       const width = Math.round(asset.naturalWidth * scale);
@@ -167,7 +262,18 @@ export default function App() {
       setSelectedId(updated.layers[updated.layers.length - 1]?.id ?? null);
       return updated;
     });
-    setStatus(position ? `${asset.name} agregado desde biblioteca en el lienzo.` : `${asset.name} agregado centrado como capa editable.`);
+    setTool('select');
+    setStatus(position ? `${asset.name} agregado desde biblioteca en el lienzo. Herramienta Mover activada.` : `${asset.name} agregado centrado como capa editable. Herramienta Mover activada.`);
+  };
+
+  const addShape = (shape: ShapeLayer['shape']) => {
+    commitProject((current) => {
+      const updated = addShapeLayer(current, shape, { stroke: brushColor, strokeWidth: brushWidth, fill: shapeFill });
+      setSelectedId(updated.layers[updated.layers.length - 1]?.id ?? null);
+      return updated;
+    });
+    setTool('select');
+    setStatus('Forma agregada como capa editable.');
   };
 
   return (
@@ -179,22 +285,25 @@ export default function App() {
         setBrushColor={setBrushColor}
         brushWidth={brushWidth}
         setBrushWidth={setBrushWidth}
+        shapeFill={shapeFill}
+        setShapeFill={setShapeFill}
+        onAddShape={addShape}
         onAddImage={addImage}
         onAddText={() => {
-          const updated = addTextLayer(project, 'DOMO');
-          setProject(updated);
+          const updated = addTextLayer(project, 'DOMO\nSTREETWEAR', { fill: brushColor });
+          commitProject(updated);
           setSelectedId(updated.layers[updated.layers.length - 1]?.id ?? null);
           setTool('select');
         }}
         onExport={exportCanvas}
-        onNewProject={newProject}
-        onSaveProject={saveProjectFile}
+        onNewProject={() => { void newProject(); }}
+        onSaveProject={() => { void saveProjectFile(); }}
         onOpenProject={openProjectFile}
-        onGenerate={generateAi}
+        onGenerate={() => { void generateAi(); }}
       />
       <CanvasEditor
         project={project}
-        setProject={setProject}
+        setProject={commitProject}
         tool={tool}
         selectedId={selectedId}
         setSelectedId={setSelectedId}
@@ -205,7 +314,7 @@ export default function App() {
       />
       <aside className="right-rail">
         <section className="panel ai-panel">
-          <div className="panel-title">Prompt creativo</div>
+          <div className="panel-title">Prompt creativo ultrarrealista</div>
           <div className="preset-grid">
             {promptPresets.map((preset) => (
               <button key={preset.id} title={preset.description} onClick={() => setPrompt(applyPromptPreset(preset.id, prompt))}>
@@ -214,23 +323,31 @@ export default function App() {
             ))}
           </div>
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-          <button className="primary" disabled={isGenerating} onClick={generateAi}>{isGenerating ? 'Generando…' : 'Generar con IA'}</button>
+          <button className="primary" disabled={isGenerating} onClick={() => { void generateAi(); }}>{isGenerating ? 'Generando…' : 'Generar con IA'}</button>
           {aiOutput && (
             <div className="ai-output">
               <img src={aiOutput} alt="Resultado IA" />
               <button onClick={addGeneratedAsLayer}>Pegar resultado como capa</button>
+              <button onClick={saveAiOutput}>Guardar resultado IA para exportar</button>
+              <textarea
+                className="ai-revision"
+                placeholder="Cambios para regenerar: más realista, cambia color, conserva logo, etc."
+                value={aiRevisionPrompt}
+                onChange={(event) => setAiRevisionPrompt(event.target.value)}
+              />
+              <button onClick={regenerateAiWithChanges} disabled={isGenerating}>{isGenerating ? 'Regenerando…' : 'Regenerar con cambios'}</button>
             </div>
           )}
         </section>
         <AssetLibrary onAddAsset={addAssetToProject} onStatus={setStatus} />
-        <LayerPanel project={project} selectedId={selectedId} setProject={setProject} setSelectedId={setSelectedId} />
-        <LayerProperties project={project} selectedId={selectedId} setProject={setProject} setSelectedId={setSelectedId} />
+        <LayerPanel project={project} selectedId={selectedId} setProject={commitProject} setSelectedId={setSelectedId} />
+        <LayerProperties project={project} selectedId={selectedId} setProject={commitProject} setSelectedId={setSelectedId} />
         <PreflightPanel project={project} />
         <UpdatePanel />
         <SettingsPanel settings={settings} onChange={setSettings} onSave={saveSettings} />
       </aside>
       <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden onChange={(event) => handleFiles(event.target.files)} />
-      <footer className="status-bar">{status}</footer>
+      <footer className="status-bar">{isDirty ? '● ' : ''}{status}</footer>
     </div>
   );
 }

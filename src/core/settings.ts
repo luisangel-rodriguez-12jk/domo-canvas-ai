@@ -6,7 +6,7 @@ export const defaultSettings: AppSettings = {
     provider: 'mock',
     apiKey: '',
     endpoint: '',
-    model: 'gpt-image-1',
+    model: 'mock-preview',
     size: '1024x1536',
     printPreset: 'dtg',
     preserveLogos: true,

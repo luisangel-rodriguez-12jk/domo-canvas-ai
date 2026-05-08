@@ -1,5 +1,5 @@
-
 import { getApiKeyGuide } from '../core/apiKeyGuide';
+import { getDefaultModelForProvider, getModelsForProvider, providerOptions } from '../core/aiModels';
 import type { AppSettings, AiProvider } from '../core/types';
 
 interface Props {
@@ -10,13 +10,9 @@ interface Props {
 
 export function SettingsPanel({ settings, onChange, onSave }: Props) {
   const updateAi = (patch: Partial<AppSettings['ai']>) => onChange({ ...settings, ai: { ...settings.ai, ...patch } });
-  const providerModels: Record<AiProvider, string> = {
-    mock: 'mock-preview',
-    openai: 'gpt-image-1',
-    gemini: 'gemini-2.5-flash-image-preview',
-    custom: settings.ai.model || 'custom-image-model',
-  };
   const apiGuide = getApiKeyGuide(settings.ai.provider);
+  const models = getModelsForProvider(settings.ai.provider);
+  const modelKnown = models.some((model) => model.id === settings.ai.model);
 
   return (
     <section className="panel settings-panel">
@@ -25,14 +21,17 @@ export function SettingsPanel({ settings, onChange, onSave }: Props) {
         Proveedor
         <select
           value={settings.ai.provider}
-          onChange={(event) => updateAi({ provider: event.target.value as AiProvider, model: providerModels[event.target.value as AiProvider] })}
+          onChange={(event) => {
+            const provider = event.target.value as AiProvider;
+            updateAi({ provider, model: getDefaultModelForProvider(provider) });
+          }}
         >
-          <option value="mock">Simulado / sin costo</option>
-          <option value="openai">OpenAI Images</option>
-          <option value="gemini">Google Gemini / Nano Banana</option>
-          <option value="custom">Endpoint personalizado</option>
+          {providerOptions.map((provider) => (
+            <option key={provider.id} value={provider.id}>{provider.label}</option>
+          ))}
         </select>
       </label>
+      <p className="hint">{providerOptions.find((provider) => provider.id === settings.ai.provider)?.note}</p>
       <label>
         API key local
         <input
@@ -44,8 +43,13 @@ export function SettingsPanel({ settings, onChange, onSave }: Props) {
       </label>
       <label>
         Modelo
-        <input value={settings.ai.model} onChange={(event) => updateAi({ model: event.target.value })} />
+        <select value={modelKnown ? settings.ai.model : getDefaultModelForProvider(settings.ai.provider)} onChange={(event) => updateAi({ model: event.target.value })}>
+          {models.map((model) => (
+            <option key={model.id} value={model.id}>{model.label}</option>
+          ))}
+        </select>
       </label>
+      <p className="hint">{models.find((model) => model.id === settings.ai.model)?.note ?? models[0]?.note}</p>
       <label>
         Endpoint opcional
         <input placeholder="Déjalo vacío para usar el endpoint por defecto" value={settings.ai.endpoint || ''} onChange={(event) => updateAi({ endpoint: event.target.value })} />

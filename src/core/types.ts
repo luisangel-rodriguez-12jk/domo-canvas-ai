@@ -35,7 +35,7 @@ export interface LibraryAsset {
 export interface BaseLayer {
   id: string;
   name: string;
-  type: 'image' | 'text';
+  type: 'image' | 'text' | 'shape';
   x: number;
   y: number;
   width: number;
@@ -63,7 +63,15 @@ export interface TextLayer extends BaseLayer {
   align: 'left' | 'center' | 'right';
 }
 
-export type CanvasLayer = ImageLayer | TextLayer;
+export interface ShapeLayer extends BaseLayer {
+  type: 'shape';
+  shape: 'line' | 'rect' | 'circle';
+  stroke: string;
+  strokeWidth: number;
+  fill: string;
+}
+
+export type CanvasLayer = ImageLayer | TextLayer | ShapeLayer;
 
 export interface Stroke {
   id: string;
