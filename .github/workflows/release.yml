@@ -35,6 +35,9 @@ jobs:
       - name: Configure GitHub update feed
         run: node scripts/set-github-publish.mjs
 
+      - name: Build renderer and Electron main
+        run: npm run build
+
       - name: Build and publish Windows installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -16,4 +16,10 @@ describe('Electron auto-updater startup behavior', () => {
     expect(mainSource).toContain("autoUpdater.on('update-downloaded', (info) => installDownloadedUpdate(info.version))");
     expect(mainSource).toContain('autoUpdater.quitAndInstall(false, true)');
   });
+
+  it('shows a diagnostic page if the renderer files are missing instead of staying black', () => {
+    expect(mainSource).toContain('function showRendererLoadError');
+    expect(mainSource).toContain("win.webContents.on('did-fail-load'");
+    expect(mainSource).toContain('No se pudo cargar la interfaz');
+  });
 });

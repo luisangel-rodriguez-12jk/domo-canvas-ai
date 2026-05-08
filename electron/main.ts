@@ -255,6 +255,17 @@ async function openProject() {
   return { canceled: false, filePath, projectJson };
 }
 
+function showRendererLoadError(win: BrowserWindow, message: string) {
+  const escaped = message.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Domo Canvas AI - error</title><style>
+    body{margin:0;background:#08080b;color:#f7f7fb;font-family:Segoe UI,Arial,sans-serif;display:grid;place-items:center;min-height:100vh}
+    main{max-width:760px;padding:32px;border:1px solid #33202a;border-radius:24px;background:#121218;box-shadow:0 20px 60px #0008}
+    h1{margin:0 0 12px;color:#ff2a55;font-size:28px} code{display:block;white-space:pre-wrap;background:#050507;border:1px solid #2a2a35;padding:16px;border-radius:14px;color:#f6cad3}
+    p{line-height:1.55;color:#cfcfd8}
+  </style></head><body><main><h1>No se pudo cargar la interfaz</h1><p>La app abrió Electron, pero falló el renderer de React. Reinstala la última versión desde GitHub Releases o espera el auto-update.</p><code>${escaped}</code></main></body></html>`;
+  win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => undefined);
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1480,
@@ -276,12 +287,18 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    if (validatedURL.startsWith('data:')) return;
+    showRendererLoadError(win, `Carga fallida: ${errorCode} ${errorDescription}\nURL: ${validatedURL}`);
+  });
+
   configureAutoUpdates(win);
 
   if (isDev) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL!);
+    win.loadURL(process.env.VITE_DEV_SERVER_URL!).catch((error) => showRendererLoadError(win, error.message));
   } else {
-    win.loadFile(path.join(__dirname, '../../dist/index.html'));
+    const rendererPath = path.join(__dirname, '../../dist/index.html');
+    win.loadFile(rendererPath).catch((error) => showRendererLoadError(win, `No se pudo abrir ${rendererPath}\n${error.message}`));
   }
 }
 
