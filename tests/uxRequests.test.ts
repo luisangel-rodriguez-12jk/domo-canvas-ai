@@ -102,4 +102,43 @@ describe('requested editor UX upgrades', () => {
     expect(appSource()).toContain('generatedAssets');
     expect(appSource()).toContain('extraAssets={generatedAssets}');
   });
+
+  it('adds generated AI backgrounds as editable layers instead of locked stretched backgrounds', () => {
+    const source = appSource();
+    expect(source).toContain("name: 'Fondo IA editable'");
+    expect(source).toContain('asGeneratedBackgroundLayer');
+    expect(source).not.toContain("name: 'Fondo IA', src: response.imageDataUrl, naturalWidth: image.naturalWidth || current.width, naturalHeight: image.naturalHeight || current.height, asBackground: true");
+  });
+
+  it('supports shift-wheel zoom with smaller zoom-stable transformer handles', () => {
+    const source = canvasSource();
+    expect(source).toContain('zoomLevel');
+    expect(source).toContain('event.evt.shiftKey');
+    expect(source).toContain('onWheel={handleWheelZoom}');
+    expect(source).toContain('transformerAnchorSize');
+    expect(source).toContain('anchorSize={transformerAnchorSize}');
+  });
+
+  it('creates text by clicking the canvas while the text tool is active', () => {
+    const source = canvasSource();
+    expect(source).toContain("tool === 'text'");
+    expect(source).toContain('addTextLayer');
+    expect(source).toContain('Nuevo texto');
+  });
+
+  it('shows explicit AI generation feedback while image, asset, or background generation is running', () => {
+    const source = appSource();
+    expect(source).toContain('generationLabel');
+    expect(source).toContain('generation-overlay');
+    expect(source).toContain('thinking-spinner');
+  });
+
+  it('has scrollable tools, draggable side panel resizing, and canvas size controls', () => {
+    const app = appSource();
+    const css = readFileSync(join(process.cwd(), 'src/styles/app.css'), 'utf8');
+    expect(css).toContain('overflow-y: auto');
+    expect(app).toContain('sidebar-resizer');
+    expect(app).toContain('canvas-size-panel');
+    expect(app).toContain('resizeProject');
+  });
 });

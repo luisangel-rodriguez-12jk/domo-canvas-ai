@@ -25,6 +25,12 @@ export function createProject(name = 'Nuevo diseño Domo', width = 4500, height 
   };
 }
 
+export function resizeProject(project: CanvasProject, width: number, height: number): CanvasProject {
+  const safeWidth = Math.max(320, Math.round(Number(width) || project.width));
+  const safeHeight = Math.max(320, Math.round(Number(height) || project.height));
+  return touchProject({ ...project, width: safeWidth, height: safeHeight });
+}
+
 export function addImageLayer(
   project: CanvasProject,
   input: { name: string; src: string; naturalWidth: number; naturalHeight: number; asBackground?: boolean; x?: number; y?: number },

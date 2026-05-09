@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEven
 import { Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import type { CanvasLayer, CanvasProject, ImageLayer, LibraryAsset, ShapeLayer, Stroke, TextLayer, ToolMode } from '../core/types';
-import { createId, moveLayer, touchProject, updateLayer } from '../core/layers';
+import { addTextLayer, createId, moveLayer, touchProject, updateLayer } from '../core/layers';
 
 function useHtmlImage(src?: string) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -120,6 +120,7 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
   const containerRef = useRef<HTMLDivElement | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 900, height: 780 });
+  const [zoomLevel, setZoomLevel] = useState(1);
   const [isDrawing, setIsDrawing] = useState(false);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [editingTextValue, setEditingTextValue] = useState('');
@@ -134,9 +135,13 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
     return () => window.removeEventListener('resize', resize);
   }, []);
 
-  const scale = useMemo(() => Math.min(containerSize.width / project.width, containerSize.height / project.height), [containerSize, project.width, project.height]);
-  const stageWidth = Math.round(project.width * scale);
-  const stageHeight = Math.round(project.height * scale);
+  const baseScale = useMemo(() => Math.min(containerSize.width / project.width, containerSize.height / project.height), [containerSize, project.width, project.height]);
+  const viewScale = baseScale * zoomLevel;
+  const scale = viewScale;
+  const stageWidth = Math.round(project.width * viewScale);
+  const stageHeight = Math.round(project.height * viewScale);
+  const transformerAnchorSize = Math.max(7, Math.round(12 / Math.max(0.05, viewScale)));
+  const transformerStrokeWidth = Math.max(1, 1.5 / Math.max(0.05, viewScale));
   const editingLayer = project.layers.find((layer): layer is TextLayer => layer.id === editingTextId && layer.type === 'text') ?? null;
 
   useEffect(() => {
@@ -157,6 +162,26 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
     const position = stageRef.current?.getPointerPosition();
     if (!position) return null;
     return { x: position.x / scale, y: position.y / scale };
+  };
+
+  const handleWheelZoom = (event: Konva.KonvaEventObject<WheelEvent>) => {
+    if (!event.evt.shiftKey) return;
+    event.evt.preventDefault();
+    const direction = event.evt.deltaY > 0 ? -1 : 1;
+    setZoomLevel((current) => {
+      const next = current * (direction > 0 ? 1.12 : 1 / 1.12);
+      return Math.max(0.2, Math.min(5, Number(next.toFixed(3))));
+    });
+  };
+
+  const createTextAtPointer = () => {
+    const pos = pointer() ?? { x: project.width / 2, y: project.height / 2 };
+    const withText = addTextLayer(project, 'Nuevo texto', { fill: brushColor });
+    const textLayer = withText.layers[withText.layers.length - 1];
+    if (!textLayer) return;
+    const updated = updateLayer(withText, textLayer.id, { x: Math.round(pos.x), y: Math.round(pos.y) } as Partial<CanvasLayer>);
+    setProject(updated);
+    setSelectedId(textLayer.id);
   };
 
   const startDrawing = () => {
@@ -258,9 +283,14 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
         width={stageWidth}
         height={stageHeight}
         className="konva-stage"
+        onWheel={handleWheelZoom}
         onMouseDown={(event) => {
-          const clickedOnEmpty = event.target === event.target.getStage();
+          const clickedOnEmpty = event.target === event.target.getStage() || ['canvas-backdrop', 'print-safe-guide'].includes(event.target.name());
           if (clickedOnEmpty && tool === 'select') setSelectedId(null);
+          if (clickedOnEmpty && tool === 'text') {
+            createTextAtPointer();
+            return;
+          }
           startDrawing();
         }}
         onMouseMove={continueDrawing}
@@ -337,7 +367,16 @@ export function CanvasEditor({ project, setProject, tool, selectedId, setSelecte
                 globalCompositeOperation={stroke.tool === 'eraser' ? 'destination-out' : 'source-over'}
               />
             ))}
-            <Transformer ref={transformerRef} rotateEnabled anchorSize={22} borderStroke="#ff2a55" anchorStroke="#ffffff" anchorFill="#ff2a55" />
+            <Transformer
+              ref={transformerRef}
+              rotateEnabled
+              anchorSize={transformerAnchorSize}
+              borderStroke="#ff2a55"
+              borderStrokeWidth={transformerStrokeWidth}
+              anchorStroke="#ffffff"
+              anchorStrokeWidth={transformerStrokeWidth}
+              anchorFill="#ff2a55"
+            />
           </Group>
         </Layer>
       </Stage>

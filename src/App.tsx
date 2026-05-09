@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type Konva from 'konva';
 import { AssetLibrary } from './components/AssetLibrary';
 import { CanvasEditor } from './components/CanvasEditor';
@@ -8,7 +8,7 @@ import { PreflightPanel } from './components/PreflightPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { Toolbar } from './components/Toolbar';
 import { UpdatePanel } from './components/UpdatePanel';
-import { addImageLayer, addShapeLayer, addTextLayer, createProject, touchProject } from './core/layers';
+import { addImageLayer, addShapeLayer, addTextLayer, createProject, resizeProject, touchProject } from './core/layers';
 import { buildPrintAwarePrompt } from './core/aiPrompt';
 import { createMockAiPreview } from './core/mockAi';
 import { exportStageDataUrl, makeExportFileName, type ExportMode } from './core/exporter';
@@ -76,12 +76,22 @@ export default function App() {
   const [status, setStatus] = useState('Listo. Puedes cargar fondo, logos PNG y dibujar encima.');
   const [aiOutput, setAiOutput] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationLabel, setGenerationLabel] = useState('');
+  const [toolbarWidth, setToolbarWidth] = useState(118);
+  const [rightRailWidth, setRightRailWidth] = useState(390);
+  const [canvasWidthInput, setCanvasWidthInput] = useState('4500');
+  const [canvasHeightInput, setCanvasHeightInput] = useState('5400');
   const projectRef = useRef(project);
   const stageRef = useRef<Konva.Stage | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingBackgroundRef = useRef(false);
 
   useEffect(() => { projectRef.current = project; }, [project]);
+
+  useEffect(() => {
+    setCanvasWidthInput(String(project.width));
+    setCanvasHeightInput(String(project.height));
+  }, [project.width, project.height]);
 
   const commitProject = useCallback((next: CanvasProject | ((current: CanvasProject) => CanvasProject), markDirty = true) => {
     setProject((current) => {
@@ -246,6 +256,7 @@ export default function App() {
     const stage = stageRef.current;
     if (!stage) return null;
     setIsGenerating(true);
+    setGenerationLabel(statusMessage.replace(/…$/, ''));
     setStatus(statusMessage);
     try {
       const compositionPng = stage.toDataURL({ mimeType: 'image/png', pixelRatio: Math.max(1, projectRef.current.width / stage.width()) });
@@ -267,6 +278,7 @@ export default function App() {
       return null;
     } finally {
       setIsGenerating(false);
+      setGenerationLabel('');
     }
   };
 
@@ -281,9 +293,34 @@ export default function App() {
     const response = await requestAiImage(backgroundPrompt, 'Generando fondo IA ultrarrealista…');
     if (!response) return;
     const image = await loadImageElement(response.imageDataUrl);
-    commitProject((current) => addImageLayer(current, { name: 'Fondo IA', src: response.imageDataUrl, naturalWidth: image.naturalWidth || current.width, naturalHeight: image.naturalHeight || current.height, asBackground: true }));
+    const asGeneratedBackgroundLayer = true;
+    commitProject((current) => {
+      const naturalWidth = image.naturalWidth || current.width;
+      const naturalHeight = image.naturalHeight || current.height;
+      const fitScale = Math.min(current.width / Math.max(1, naturalWidth), current.height / Math.max(1, naturalHeight));
+      const fittedWidth = Math.round(naturalWidth * fitScale);
+      const fittedHeight = Math.round(naturalHeight * fitScale);
+      const updated = addImageLayer(current, {
+        name: 'Fondo IA editable',
+        src: response.imageDataUrl,
+        naturalWidth,
+        naturalHeight,
+        asBackground: false,
+        x: Math.round((current.width - fittedWidth) / 2),
+        y: Math.round((current.height - fittedHeight) / 2),
+      });
+      const newLayer = updated.layers[updated.layers.length - 1];
+      if (asGeneratedBackgroundLayer && newLayer) {
+        const layers = updated.layers.map((layer) => (
+          layer.id === newLayer.id ? { ...layer, width: fittedWidth, height: fittedHeight } : layer
+        ));
+        setSelectedId(newLayer.id);
+        return touchProject({ ...updated, layers });
+      }
+      return updated;
+    });
     setTool('select');
-    setStatus('Fondo IA generado y aplicado. Herramienta Mover activada.');
+    setStatus('Fondo IA generado como capa editable. Puedes moverlo, escalarlo, bloquearlo o mandarlo atrás desde Capas.');
   };
 
   const generateAiLibraryAsset = async () => {
@@ -354,8 +391,40 @@ export default function App() {
     setStatus('Forma agregada como capa editable.');
   };
 
+  const applyCanvasSize = () => {
+    const nextWidth = Number(canvasWidthInput);
+    const nextHeight = Number(canvasHeightInput);
+    if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight) || nextWidth < 320 || nextHeight < 320) {
+      setStatus('El lienzo debe medir al menos 320×320 px.');
+      return;
+    }
+    commitProject((current) => resizeProject(current, nextWidth, nextHeight));
+    setSelectedId(null);
+    setStatus(`Lienzo redimensionado a ${Math.round(nextWidth)}×${Math.round(nextHeight)} px. Ctrl+Z lo puede revertir.`);
+  };
+
+  const startSidebarResize = (side: 'left' | 'right') => (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const initialToolbar = toolbarWidth;
+    const initialRightRail = rightRailWidth;
+    const handleMove = (moveEvent: PointerEvent) => {
+      if (side === 'left') setToolbarWidth(Math.max(92, Math.min(220, initialToolbar + moveEvent.clientX - startX)));
+      else setRightRailWidth(Math.max(300, Math.min(680, initialRightRail + startX - moveEvent.clientX)));
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', stop);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', stop);
+  };
+
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      style={{ gridTemplateColumns: `${toolbarWidth}px 8px minmax(360px, 1fr) 8px ${rightRailWidth}px` }}
+    >
       <Toolbar
         tool={tool}
         setTool={setTool}
@@ -381,6 +450,7 @@ export default function App() {
         onOpenProject={openProjectFile}
         onGenerate={() => { void generateAi(); }}
       />
+      <div className="sidebar-resizer sidebar-resizer-left" role="separator" aria-label="Cambiar ancho de herramientas" onPointerDown={startSidebarResize('left')} />
       <CanvasEditor
         project={project}
         setProject={commitProject}
@@ -393,6 +463,7 @@ export default function App() {
         stageRef={stageRef}
         onAssetDrop={addAssetToProject}
       />
+      <div className="sidebar-resizer sidebar-resizer-right" role="separator" aria-label="Cambiar ancho de propiedades" onPointerDown={startSidebarResize('right')} />
       <aside className="right-rail">
         <section className="panel ai-panel">
           <div className="panel-title">Prompt creativo ultrarrealista</div>
@@ -417,6 +488,12 @@ export default function App() {
             <button disabled={isGenerating} onClick={() => { void generateAiBackground(); }}>Generar fondo IA</button>
             <button disabled={isGenerating} onClick={() => { void generateAiLibraryAsset(); }}>Generar asset sin fondo</button>
           </div>
+          {isGenerating && (
+            <div className="generation-overlay" role="status" aria-live="polite">
+              <span className="thinking-spinner" />
+              <span>{generationLabel || 'Generando con IA'}</span>
+            </div>
+          )}
           {aiOutput && (
             <div className="ai-output">
               <img src={aiOutput} alt="Resultado IA" />
@@ -432,6 +509,21 @@ export default function App() {
               <button onClick={regenerateAiWithChanges} disabled={isGenerating}>{isGenerating ? 'Regenerando…' : 'Regenerar con cambios'}</button>
             </div>
           )}
+        </section>
+        <section className="panel canvas-size-panel">
+          <div className="panel-title">Tamaño del lienzo</div>
+          <p className="hint">Cambia el área de trabajo en px. No borra capas ni trazos; Ctrl+Z lo revierte.</p>
+          <div className="grid-2">
+            <label>
+              Ancho px
+              <input type="number" min={320} step={50} value={canvasWidthInput} onChange={(event) => setCanvasWidthInput(event.target.value)} onKeyDown={(event) => event.stopPropagation()} />
+            </label>
+            <label>
+              Alto px
+              <input type="number" min={320} step={50} value={canvasHeightInput} onChange={(event) => setCanvasHeightInput(event.target.value)} onKeyDown={(event) => event.stopPropagation()} />
+            </label>
+          </div>
+          <button onClick={applyCanvasSize}>Aplicar tamaño de lienzo</button>
         </section>
         <AssetLibrary onAddAsset={addAssetToProject} onStatus={setStatus} extraAssets={generatedAssets} />
         <LayerPanel project={project} selectedId={selectedId} setProject={commitProject} setSelectedId={setSelectedId} />

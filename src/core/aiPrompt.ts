@@ -4,7 +4,7 @@ import type { AiSettings, CanvasProject } from './types';
 export function buildPrintAwarePrompt(userPrompt: string, project: CanvasProject, settings: AiSettings): string {
   const strokeMeanings = project.strokes
     .filter((stroke) => stroke.metaPrompt?.trim())
-    .map((stroke, index) => `Trazo ${index + 1} (${stroke.tool}, ${Math.round(stroke.width)}px, ${stroke.color}): ${stroke.metaPrompt?.trim()}`);
+    .map((stroke, index) => `Trazo ${index + 1} (${stroke.tool}, ${Math.round(stroke.width)}px, ${stroke.color}): interpreta específicamente este trazo como "${stroke.metaPrompt?.trim()}"; respeta que solo aplica a las líneas pintadas con ese pincel.`);
   const printRules = [
     'Actúa como director creativo experto en diseño de playeras streetwear.',
     `Lienzo destino: ${project.width}x${project.height}px, composición centrada para impresión.`,

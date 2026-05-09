@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addImageLayer, addTextLayer, bringForward, duplicateLayer, moveLayer, removeLayer, toggleLayerVisibility } from '../src/core/layers';
+import { addImageLayer, addTextLayer, bringForward, duplicateLayer, moveLayer, removeLayer, resizeProject, toggleLayerVisibility } from '../src/core/layers';
 import type { CanvasProject } from '../src/core/types';
 
 const emptyProject = (): CanvasProject => ({
@@ -58,6 +58,19 @@ describe('layer model', () => {
     expect(updated.layers[1].name).toContain('copia');
     expect(updated.layers[1].x).toBe(original.x + 80);
     expect(updated.layers[1].y).toBe(original.y + 80);
+  });
+
+  it('resizes the canvas without destroying layers, strokes, or AI history', () => {
+    let project = addTextLayer(emptyProject(), 'DOMO');
+    project.strokes.push({ id: 's1', tool: 'brush', points: [1, 2], color: '#fff', width: 8, opacity: 1 });
+    project.aiHistory.push({ id: 'ai1', createdAt: '2026-01-01T00:00:00.000Z', provider: 'mock', model: 'mock', prompt: 'x', output: 'data:image/png;base64,x' });
+    const resized = resizeProject(project, 3000, 4000);
+    expect(resized.width).toBe(3000);
+    expect(resized.height).toBe(4000);
+    expect(resized.layers).toHaveLength(1);
+    expect(resized.strokes).toHaveLength(1);
+    expect(resized.aiHistory).toHaveLength(1);
+    expect(project.width).toBe(4500);
   });
 });
 
